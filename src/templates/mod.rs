@@ -135,9 +135,10 @@ The CLI provides data; YOU own all judgment.
 5. Inspect Figma via `prd-reviewer figma url '<URL>'` when applicable.
 6. Compute score = 100 − Σ(deductions) and produce the report with
    Score · Section Checklist · Blockers (P0) · Quality (P1) ·
-   Suggestions (P2) · Strengths (3–5) · Action Items.
+   Suggestions (P2) · **Engineer FAQ (always, 6 categories, ANSWERED /
+   PARTIAL / OPEN per question)** · Strengths (3–5) · Action Items.
 7. Ask user via `AskUserQuestion` whether to post the review HTML to the
-   wiki page.
+   wiki page. The posted HTML must include the Engineer FAQ table.
 
 ### Generate
 1. Parse the seed brief. Identify unknowns.
@@ -318,7 +319,7 @@ Confirm the design file exists and matches the PRD description.
 score = 100 − Σ(deductions)
 ```
 
-Report format:
+Report format (all sections REQUIRED, including **Engineer FAQ**):
 
 ```markdown
 ## PRD Review: <Title>
@@ -342,6 +343,35 @@ Report format:
 
 ### Suggestions (P2 — nice to have)
 1. **Suggestion** — description.
+
+### Engineer FAQ — pre-flight questions
+
+The questions engineers will raise during assessment. PM should resolve
+the ❌ Open items BEFORE the kickoff so the assessment session can focus
+on true edge cases, not clarifications.
+
+Status legend: ✅ answered in the PRD · 🟡 partial/implied · ❌ open
+
+Categories to cover (generate ≥ 1 question per category; more where the
+feature warrants):
+
+1. **Data & Persistence** — where is state stored, who owns it, reset rule, install/re-install behaviour
+2. **State & Concurrency** — same action twice, two devices, app backgrounded mid-flow, race conditions
+3. **Error & Offline** — API failure, network drop mid-flow, cached state priority
+4. **Platform & Device** — iPad, min iOS version, dark mode, locale, clock/timezone, reduced-motion
+5. **Integration Contracts** — endpoint / WS event / payload shape, who calls whom
+6. **Observability & Rollout** — logs, analytics events, feature flag, kill-switch, rollback trigger
+
+Render as a single table:
+
+| Category | Question | Status | Notes / where answered |
+|----------|----------|--------|------------------------|
+| Data & Persistence | Where is "already shown today" state stored? | ❌ | Not specified; client-local or server? |
+| ... | ... | ... | ... |
+
+**Always include this section, regardless of score.** Even a 96/100 PRD
+has FAQ value — it turns the assessment meeting into a 30-minute
+edge-case review instead of a 2-hour information hunt.
 
 ### Strengths
 - Always include 3–5 positives — reviews must be balanced.
@@ -489,9 +519,25 @@ the user the exact wiki-paste steps.)
 1. ALL 11 sections must appear in the checklist, even if OK
 2. Status values: OK (0), Incomplete (-N), MISSING (-N)
 3. Blockers (P0): only MISSING or critically incomplete
-4. Strengths: always include 3–5 positives
-5. No emojis — plain text only for wiki rendering
-6. Action Items: P0 = blocker, P1 = important, P2 = nice-to-have; each has an owner
+4. **Engineer FAQ table is REQUIRED** — always include, regardless of score
+5. In the FAQ table, use text labels (not emojis) for wiki compatibility: `ANSWERED` / `PARTIAL` / `OPEN`
+6. Strengths: always include 3–5 positives
+7. No emojis elsewhere — plain text only for wiki rendering
+8. Action Items: P0 = blocker, P1 = important, P2 = nice-to-have; each has an owner
+
+### HTML skeleton for the Engineer FAQ block
+
+```html
+<h3>Engineer FAQ — pre-flight questions</h3>
+<p>Status legend: <strong>ANSWERED</strong> (in PRD) ·
+<strong>PARTIAL</strong> (implied/tighten) ·
+<strong>OPEN</strong> (PM to resolve before kickoff)</p>
+<table>
+<tr><th>Category</th><th>Question</th><th>Status</th><th>Notes</th></tr>
+<tr><td>Data &amp; Persistence</td><td>Where is "already shown today" state stored?</td><td>OPEN</td><td>Not specified; client-local or server flag?</td></tr>
+<!-- ... one row per question, ≥ 1 per category -->
+</table>
+```
 
 ## Notes
 - A good PRD should be implementable without asking the PM any questions

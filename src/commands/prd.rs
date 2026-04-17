@@ -456,6 +456,11 @@ Produce a markdown report with:
 - **Blockers (P0)** — Missing or critically Incomplete
 - **Quality Issues (P1)** — fixable gaps
 - **Suggestions (P2)** — nice-to-haves
+- **Engineer FAQ** — REQUIRED, always. 6 categories (Data & Persistence,
+  State & Concurrency, Error & Offline, Platform & Device, Integration
+  Contracts, Observability & Rollout). Tag each question ANSWERED /
+  PARTIAL / OPEN. Lets the PM resolve opens before the assessment
+  meeting so engineers can focus on true edge cases.
 - **Strengths** — always include 3–5 positives (reviews must be balanced)
 - **Action Items** — priority / item / owner
 
@@ -467,7 +472,8 @@ Ask the user first via `AskUserQuestion`. If yes:
 prd-reviewer jira wiki page comment <PAGE_ID> --file <review.html> --insecure
 ```
 
-All 11 sections must appear in the checklist HTML. No emojis. No invented data.
+All 11 sections must appear in the checklist HTML. The Engineer FAQ table
+is also required in the HTML. No emojis. No invented data.
 "#;
 
 // ─── PRD Template ──────────────────────────────────────────────────────────
