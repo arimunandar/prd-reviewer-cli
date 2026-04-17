@@ -46,7 +46,7 @@ report format live in `.claude/skills/prd-reviewer/SKILL.md`.
 # PRD tools
 prd-reviewer prd fetch <PAGE_ID> --raw          # Raw markdown
 prd-reviewer prd fetch <PAGE_ID>                # Structured markdown
-prd-reviewer prd score <PAGE_ID>                # JSON score (Layer 1)
+prd-reviewer prd review <PAGE_ID> --json        # JSON review (Layer 1)
 prd-reviewer prd review <PAGE_ID>               # 11-section structural review
 prd-reviewer prd review <PAGE_ID> --comment     # Post review to wiki
 prd-reviewer prd template                       # PRD template v3 (11 sections)
@@ -114,7 +114,7 @@ defined in `.claude/skills/prd-reviewer/SKILL.md` — follow it exactly.
 
 ### Review
 1. `prd-reviewer prd fetch <PAGE_ID> --raw`
-2. `prd-reviewer prd score <PAGE_ID>` (skip deep review if < 60)
+2. `prd-reviewer prd review <PAGE_ID> --json` (skip deep review if score < 60)
 3. Apply 11-section deep audit + cross-section validation
 4. Inspect Figma via `prd-reviewer figma url '<URL>'`
 5. Produce report with Score · Blockers (P0) · Quality (P1) · Suggestions (P2)
@@ -160,7 +160,7 @@ name: prd-reviewer
 description: >
   PRD co-pilot for product teams. TRIGGER when user wants to REVIEW, GENERATE,
   or ADJUST a Product Requirement Document. Examples — Review: "review PRD",
-  "PRD score", "is this PRD ready", shared wiki URL. Generate: "write a PRD
+  "is this PRD ready", "evaluate PRD", shared wiki URL. Generate: "write a PRD
   for...", "draft a PRD about...", "help me start a PRD". Adjust: "improve
   this PRD", "fill the gaps", "fix ambiguities in PRD X". Use AskUserQuestion
   to interview the user for clarifications during Generate/Adjust.
@@ -235,9 +235,9 @@ Read `.tuntun/prd/<title>.raw.md` for full content.
 
 ### Step 2 — CLI pre-check (Layer 1, structural)
 ```bash
-prd-reviewer prd score <PAGE_ID>
+prd-reviewer prd review <PAGE_ID> --json
 ```
-If score < 60, report the structural gaps and stop — do not run the deep review until basics are fixed.
+Returns a JSON result with a `score` field (0–100). If score < 60, report the structural gaps and stop — do not run the deep review until basics are fixed.
 
 ### Step 3 — Deep semantic review (Layer 2)
 For each of the 11 sections, judge:
@@ -412,7 +412,7 @@ the user the exact wiki-paste steps.)
 |------|---------|
 | Fetch raw PRD | `prd-reviewer prd fetch <PAGE_ID> --raw` |
 | Structural review (CLI Layer 1) | `prd-reviewer prd review <PAGE_ID>` |
-| Score only (JSON) | `prd-reviewer prd score <PAGE_ID>` |
+| Review as JSON | `prd-reviewer prd review <PAGE_ID> --json` |
 | Post review to wiki | `prd-reviewer prd review <PAGE_ID> --comment` |
 | PRD template (11 sections) | `prd-reviewer prd template` |
 | List saved PRDs | `ls .tuntun/prd/` |

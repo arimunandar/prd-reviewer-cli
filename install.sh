@@ -134,7 +134,7 @@ show_next_steps() {
     echo ""
     echo "  3. Start using:"
     echo "       prd-reviewer prd fetch <PAGE_ID> --raw   # fetch a PRD"
-    echo "       prd-reviewer prd score <PAGE_ID>         # JSON score"
+    echo "       prd-reviewer prd review <PAGE_ID> --json # JSON review"
     echo "       prd-reviewer prd review <PAGE_ID>        # structural review"
     echo "       prd-reviewer prd template                # PRD template (11 sections)"
     echo "       prd-reviewer jira --help                 # Jira & Wiki tools"

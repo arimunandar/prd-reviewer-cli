@@ -8,8 +8,8 @@ use crate::jira::confluence;
 use crate::jira::error::JiraError;
 
 // ─── Unified PRD Review Framework ──────────────────────────────────────────
-// Single source of truth for both CLI automated review and AI agent skill.
-// 14 mandatory sections, weighted by automation impact.
+// 11 mandatory sections, weights sum to 100. Shared with the /prd-reviewer
+// Claude Code skill. Approval threshold: 95/100.
 
 #[allow(dead_code)]
 struct SectionSpec {
@@ -17,24 +17,20 @@ struct SectionSpec {
     name: &'static str,
     weight_missing: u32,
     weight_incomplete: u32,
-    automation_impact: &'static str,
 }
 
 const PRD_SECTIONS: &[SectionSpec] = &[
-    SectionSpec { id: 1,  name: "Metadata",                      weight_missing: 5,  weight_incomplete: 2, automation_impact: "Routing: team, urgency, status" },
-    SectionSpec { id: 2,  name: "Background & Problem Statement", weight_missing: 10, weight_incomplete: 3, automation_impact: "Context for AI to understand why" },
-    SectionSpec { id: 3,  name: "Objectives",                     weight_missing: 10, weight_incomplete: 3, automation_impact: "Measurable goals for acceptance" },
-    SectionSpec { id: 4,  name: "Scope",                          weight_missing: 8,  weight_incomplete: 3, automation_impact: "Prevents AI scope creep" },
-    SectionSpec { id: 5,  name: "General Rules",                  weight_missing: 5,  weight_incomplete: 2, automation_impact: "Global constraints AI must follow" },
-    SectionSpec { id: 6,  name: "Acceptance Criteria",            weight_missing: 15, weight_incomplete: 5, automation_impact: "Direct test generation input" },
-    SectionSpec { id: 7,  name: "Feature Sections",               weight_missing: 15, weight_incomplete: 5, automation_impact: "Core implementation instructions" },
-    SectionSpec { id: 8,  name: "Design Reference",               weight_missing: 8,  weight_incomplete: 3, automation_impact: "UI implementation source of truth" },
-    SectionSpec { id: 9,  name: "User Flows",                     weight_missing: 8,  weight_incomplete: 3, automation_impact: "Navigation and state machine input" },
-    SectionSpec { id: 10, name: "Technical Docs / API Contract",  weight_missing: 8,  weight_incomplete: 3, automation_impact: "Backend integration automation" },
-    SectionSpec { id: 11, name: "Event Tracking",                 weight_missing: 3,  weight_incomplete: 1, automation_impact: "Analytics automation" },
-    SectionSpec { id: 12, name: "LCMP Keys",                      weight_missing: 3,  weight_incomplete: 1, automation_impact: "Localization automation" },
-    SectionSpec { id: 13, name: "Success Metrics",                weight_missing: 5,  weight_incomplete: 2, automation_impact: "Post-launch validation" },
-    SectionSpec { id: 14, name: "Related PRDs",                   weight_missing: 2,  weight_incomplete: 1, automation_impact: "Dependency awareness" },
+    SectionSpec { id: 1,  name: "Metadata",                      weight_missing: 4,  weight_incomplete: 2 },
+    SectionSpec { id: 2,  name: "TL;DR",                         weight_missing: 5,  weight_incomplete: 2 },
+    SectionSpec { id: 3,  name: "Background & Problem",          weight_missing: 10, weight_incomplete: 3 },
+    SectionSpec { id: 4,  name: "Objectives & Success Metrics",  weight_missing: 12, weight_incomplete: 4 },
+    SectionSpec { id: 5,  name: "Scope (In/Out)",                weight_missing: 8,  weight_incomplete: 3 },
+    SectionSpec { id: 6,  name: "User Stories",                  weight_missing: 7,  weight_incomplete: 2 },
+    SectionSpec { id: 7,  name: "Functional Requirements",       weight_missing: 18, weight_incomplete: 6 },
+    SectionSpec { id: 8,  name: "Design Reference",              weight_missing: 8,  weight_incomplete: 3 },
+    SectionSpec { id: 9,  name: "User Flows / Journey",          weight_missing: 8,  weight_incomplete: 3 },
+    SectionSpec { id: 10, name: "Acceptance Criteria",           weight_missing: 15, weight_incomplete: 5 },
+    SectionSpec { id: 11, name: "Risks & Open Questions",        weight_missing: 5,  weight_incomplete: 2 },
 ];
 
 const APPROVAL_THRESHOLD: u32 = 95;
@@ -65,43 +61,37 @@ pub enum PrdCommands {
     Fetch {
         /// Wiki page ID
         page_id: String,
-        /// Also run quality review
+        /// Also run quality review against the 11-section standard
         #[arg(long)]
         review: bool,
-        /// Post review findings as comment on wiki page
+        /// Post review findings as comment on wiki page (requires --review)
         #[arg(long)]
         comment: bool,
-        /// Output raw HTML without markdown conversion (preserves all original content)
+        /// Output raw lightweight markdown (preserves original structure)
         #[arg(long)]
         raw: bool,
-        /// Output review as JSON (machine-readable)
+        /// Output review as JSON (machine-readable; requires --review)
         #[arg(long)]
         json: bool,
-        /// Use relaxed scoring (default is strict 14-section weights)
-        #[arg(long)]
-        relaxed: bool,
         /// Skip TLS verification
         #[arg(long, default_value = "true")]
         insecure: bool,
     },
-    /// Review a fetched PRD for missing sections (14-section framework)
+    /// Review a fetched PRD against the 11-section compact standard
     Review {
         /// Wiki page ID
         page_id: String,
-        /// Post review findings as comment on wiki page
+        /// Post review findings as comment on the wiki page
         #[arg(long)]
         comment: bool,
         /// Output as JSON (machine-readable)
         #[arg(long)]
         json: bool,
-        /// Use relaxed scoring (default is strict 14-section weights)
-        #[arg(long)]
-        relaxed: bool,
         /// Skip TLS verification
         #[arg(long, default_value = "true")]
         insecure: bool,
     },
-    /// Output the standard PRD template for Product Team (v2 — 14 sections)
+    /// Output the canonical PRD template (v3 — 11 sections)
     Template,
 }
 
@@ -114,8 +104,7 @@ pub fn run(cmd: PrdCommands) {
 
 fn run_inner(cmd: PrdCommands) -> Result<(), JiraError> {
     match cmd {
-        PrdCommands::Fetch { page_id, review, comment, raw, json, relaxed, insecure } => {
-            let strict = !relaxed;
+        PrdCommands::Fetch { page_id, review, comment, raw, json, insecure } => {
             if raw {
                 let prd = fetch_raw(&page_id, insecure)?;
                 println!("{}", prd.content);
@@ -126,15 +115,14 @@ fn run_inner(cmd: PrdCommands) -> Result<(), JiraError> {
             println!("{}", prd.content);
             save_prd(&prd.title, &prd.content);
             if review {
-                do_review(&page_id, &prd.title, &prd.content, &prd.raw_md, comment, json, strict, insecure)?;
+                do_review(&page_id, &prd.title, &prd.content, &prd.raw_md, comment, json, insecure)?;
             }
             Ok(())
         }
-        PrdCommands::Review { page_id, comment, json, relaxed, insecure } => {
-            let strict = !relaxed;
+        PrdCommands::Review { page_id, comment, json, insecure } => {
             let prd = fetch_and_format(&page_id, insecure)?;
             save_prd(&prd.title, &prd.content);
-            do_review(&page_id, &prd.title, &prd.content, &prd.raw_md, comment, json, strict, insecure)
+            do_review(&page_id, &prd.title, &prd.content, &prd.raw_md, comment, json, insecure)
         }
         PrdCommands::Template => {
             println!("{}", PRD_TEMPLATE);
@@ -307,7 +295,7 @@ fn fetch_raw(page_id: &str, insecure: bool) -> Result<FormattedPrd, JiraError> {
     })
 }
 
-// ─── Quality Review (Unified 14-Section Framework) ─────────────────────────
+// ─── Quality Review (11-Section Compact Standard) ─────────────────────────
 
 fn do_review(
     page_id: &str,
@@ -316,10 +304,9 @@ fn do_review(
     raw_md: &str,
     post_comment: bool,
     json_output: bool,
-    strict: bool,
     insecure: bool,
 ) -> Result<(), JiraError> {
-    let findings = review_prd(prd_content, raw_md, strict);
+    let findings = review_prd(prd_content, raw_md);
 
     let total_deduction: u32 = findings.iter().map(|f| f.points).sum();
     let score = 100u32.saturating_sub(total_deduction);
@@ -393,7 +380,7 @@ fn print_review_console(
     suggestion_count: usize,
 ) {
     println!("\n---\n");
-    println!("## PRD Quality Review (14-Section Framework)\n");
+    println!("## PRD Quality Review (11-Section Compact Standard)\n");
 
     if findings.is_empty() {
         println!("No issues found.\n");
@@ -441,7 +428,7 @@ fn build_review_html(
     html.push_str(&format!("<h2>PRD Review: {}</h2>", title));
     html.push_str("<p>");
     html.push_str("<strong>Reviewer:</strong> Engineering (AI-assisted)<br/>");
-    html.push_str(&format!("<strong>Framework:</strong> 14-Section Standard (threshold: {}/100)<br/>", APPROVAL_THRESHOLD));
+    html.push_str(&format!("<strong>Framework:</strong> 11-Section Compact Standard (threshold: {}/100)<br/>", APPROVAL_THRESHOLD));
     html.push_str(&format!(
         "<strong>Score:</strong> <span style=\"background-color: {}; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;\">{}/100 — {}</span>",
         badge_color, score, status_text
@@ -513,9 +500,9 @@ struct Finding {
     message: String,
 }
 
-/// Review PRD quality using the unified 14-section framework.
+/// Review PRD quality using the 11-section compact standard.
 /// Checks both the final formatted content and the raw markdown.
-fn review_prd(content: &str, raw_md: &str, strict: bool) -> Vec<Finding> {
+fn review_prd(content: &str, raw_md: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
     let content_lower = content.to_lowercase();
     let raw_lower = raw_md.to_lowercase();
@@ -524,84 +511,141 @@ fn review_prd(content: &str, raw_md: &str, strict: bool) -> Vec<Finding> {
         content_lower.contains(pattern) || raw_lower.contains(pattern)
     };
 
+    let miss = |section: &str, msg: &str| -> Finding {
+        let spec = PRD_SECTIONS.iter().find(|s| s.name == section).expect("section");
+        Finding {
+            severity: Severity::Missing,
+            points: spec.weight_missing,
+            section: section.to_string(),
+            message: msg.to_string(),
+        }
+    };
+    let incomplete = |section: &str, msg: &str| -> Finding {
+        let spec = PRD_SECTIONS.iter().find(|s| s.name == section).expect("section");
+        Finding {
+            severity: Severity::Incomplete,
+            points: spec.weight_incomplete,
+            section: section.to_string(),
+            message: msg.to_string(),
+        }
+    };
+
     // ─── 1. Metadata ───────────────────────────────────────────────────────
     let has_metadata = has("document status") || has("document owner") || has("version")
         || (has("designer") && (has("figma") || has("status")));
-    let has_metadata_complete = has_metadata
-        && has("document status") && has("document owner");
+    let has_metadata_complete = has_metadata && has("document status") && has("document owner");
     if !has_metadata {
-        findings.push(Finding {
-            severity: Severity::Missing,
-            points: if strict { 5 } else { 3 },
-            section: "Metadata".to_string(),
-            message: "No metadata table found. Add: Document Status, Owner, Designer, Figma link, Version, Urgency.".to_string(),
-        });
+        findings.push(miss("Metadata",
+            "No metadata table. Add: Document Status, Owner, Designer, Figma link, Version, Urgency."));
     } else if !has_metadata_complete {
-        findings.push(Finding {
-            severity: Severity::Incomplete,
-            points: 2,
-            section: "Metadata".to_string(),
-            message: "Metadata incomplete. Ensure Document Status and Document Owner are specified.".to_string(),
-        });
+        findings.push(incomplete("Metadata",
+            "Metadata incomplete. Ensure at least Document Status and Document Owner are present."));
     }
 
-    // ─── 2. Background & Problem Statement ─────────────────────────────────
+    // ─── 2. TL;DR / Executive Summary ──────────────────────────────────────
+    let has_tldr = has("tl;dr") || has("tldr") || has("executive summary")
+        || has("## summary") || has("### summary") || has("# summary");
+    if !has_tldr {
+        findings.push(miss("TL;DR",
+            "No TL;DR / Executive Summary. Add a 2–4 sentence summary: what, who, why, primary outcome."));
+    }
+
+    // ─── 3. Background & Problem ───────────────────────────────────────────
     let has_background = has("background") || has("problem statement")
         || has("## problem") || has("### problem");
     if !has_background {
-        findings.push(Finding {
-            severity: Severity::Missing,
-            points: 10,
-            section: "Background & Problem Statement".to_string(),
-            message: "No background section found. Add a section explaining WHY this feature is needed and what user/business problem it solves.".to_string(),
-        });
+        findings.push(miss("Background & Problem",
+            "No background / problem section. Explain WHY this feature is needed and the current-state impact."));
     }
 
-    // ─── 3. Objectives ─────────────────────────────────────────────────────
+    // ─── 4. Objectives & Success Metrics ───────────────────────────────────
     let has_objective = has("objective") || has("## goal") || has("### goal");
-    if !has_objective {
-        findings.push(Finding {
-            severity: Severity::Missing,
-            points: 10,
-            section: "Objectives".to_string(),
-            message: "No objectives section found. Add specific, measurable goals this feature should achieve.".to_string(),
-        });
+    let has_metrics = has("success metric") || has("## success") || has("### success")
+        || has("kpi") || has("target") || has("adoption rate") || has("conversion");
+    if !has_objective && !has_metrics {
+        findings.push(miss("Objectives & Success Metrics",
+            "No objectives or KPIs. Add measurable goals with target numbers and measurement windows."));
+    } else if !has_objective || !has_metrics {
+        let gap = if !has_objective { "objectives" } else { "measurable KPIs" };
+        findings.push(incomplete("Objectives & Success Metrics",
+            &format!("Section exists but missing {}. Every PRD needs both goals and measurable KPIs.", gap)));
     }
 
-    // ─── 4. Scope ──────────────────────────────────────────────────────────
+    // ─── 5. Scope (In/Out) ─────────────────────────────────────────────────
     let has_scope = has("## scope") || has("### scope") || has("# scope")
         || has("scope requirement") || has("in scope") || has("out of scope")
         || has("in-scope") || has("out-of-scope");
+    let has_both_scope = (has("in scope") || has("in-scope")) && (has("out of scope") || has("out-of-scope"));
     if !has_scope {
-        findings.push(Finding {
-            severity: if strict { Severity::Missing } else { Severity::Incomplete },
-            points: if strict { 8 } else { 3 },
-            section: "Scope".to_string(),
-            message: "No scope section found. Add In Scope / Out of Scope to prevent scope creep and set clear boundaries for engineering.".to_string(),
-        });
+        findings.push(miss("Scope (In/Out)",
+            "No scope section. Add In-Scope / Out-of-Scope to set clear boundaries."));
+    } else if !has_both_scope {
+        findings.push(incomplete("Scope (In/Out)",
+            "Scope mentioned but missing explicit In-Scope and Out-of-Scope split. Add both to prevent scope creep."));
     }
 
-    // ─── 5. General Rules ──────────────────────────────────────────────────
-    let has_rules = has("general rule") || has("## constraint") || has("universal rule")
-        || has("# general rules") || has("## rule") || has("### rule");
-    if !has_rules {
-        findings.push(Finding {
-            severity: Severity::Incomplete,
-            points: if strict { 5 } else { 2 },
-            section: "General Rules".to_string(),
-            message: "No general rules section. Add performance requirements, data freshness, platform constraints.".to_string(),
-        });
+    // ─── 6. User Stories ───────────────────────────────────────────────────
+    let has_user_stories = has("user stor") || has("user storie")
+        || has("as a user") || has("as an admin") || has("as a ")
+        || has("## stories") || has("### stories");
+    if !has_user_stories {
+        findings.push(miss("User Stories",
+            "No user stories. Add ≥ 3 stories in the form: \"As a <persona>, I want X so that Y\"."));
     }
 
-    // ─── 6. Acceptance Criteria ────────────────────────────────────────────
+    // ─── 7. Functional Requirements ────────────────────────────────────────
+    let has_features = has("## functional requirement") || has("### functional requirement")
+        || has("## feature") || has("### feature")
+        || has("## enhancement") || has("### enhancement")
+        || has("# fe requirement") || has("## fe requirement")
+        || has("### layout") || has("### rules")
+        || has("scope requirements:") || has("**scope requirements**")
+        || has("# scope requirement")
+        || has("**location**:");
+    if !has_features {
+        findings.push(miss("Functional Requirements",
+            "No per-feature requirements. Each feature needs Layout, Rules, Data & Update, Edge Cases."));
+    } else {
+        let has_layout = has("### layout") || has("| layout");
+        let has_data_update = has("data & update") || has("data source") || has("api endpoint")
+            || has("update behavior") || has("update frequency");
+        let has_edge_cases = has("edge case") || has("edge cases") || has("empty state") || has("error state");
+        if !has_layout || !has_data_update || !has_edge_cases {
+            let mut missing_subs = Vec::new();
+            if !has_layout { missing_subs.push("Layout"); }
+            if !has_data_update { missing_subs.push("Data & Update"); }
+            if !has_edge_cases { missing_subs.push("Edge Cases"); }
+            findings.push(incomplete("Functional Requirements",
+                &format!("Feature(s) missing sub-sections: {}.", missing_subs.join(", "))));
+        }
+    }
+
+    // ─── 8. Design Reference ───────────────────────────────────────────────
+    let has_figma = has("figma.com") || has("figma link") || has("figma design");
+    let has_design_images = has("| design |") || has("| design|") || has("|design|")
+        || (has(".png") && has("figure"));
+    if !has_figma && !has_design_images {
+        findings.push(miss("Design Reference",
+            "No design reference. Add a Figma link or embed design images with figure labels (figure X.N)."));
+    } else if !has_figma && has_design_images {
+        findings.push(incomplete("Design Reference",
+            "Design images present but no Figma link. Add a Figma URL for spec inspection."));
+    }
+
+    // ─── 9. User Flows / Journey ───────────────────────────────────────────
+    let has_user_flow = has("user flow") || has("user journey") || has("entry point")
+        || has("happy path") || has("## flow") || has("behavior flow")
+        || (has("stage") && has("interaction"));
+    if !has_user_flow {
+        findings.push(miss("User Flows / Journey",
+            "No user flow / journey. Add entry points, primary journey, and edge paths with recovery."));
+    }
+
+    // ─── 10. Acceptance Criteria ───────────────────────────────────────────
     let has_acceptance = has("acceptance criteria") || has("## acceptance");
     if !has_acceptance {
-        findings.push(Finding {
-            severity: Severity::Missing,
-            points: 15,
-            section: "Acceptance Criteria".to_string(),
-            message: "No acceptance criteria found. Add testable conditions (Given/When/Then) that define when each feature is done.".to_string(),
-        });
+        findings.push(miss("Acceptance Criteria",
+            "No acceptance criteria. Add Given/When/Then scenarios covering happy path, error, empty, and offline."));
     } else {
         let has_testable = has("given") && has("when") && has("then");
         let has_numbered = content.lines().any(|l| {
@@ -612,139 +656,21 @@ fn review_prd(content: &str, raw_md: &str, strict: bool) -> Vec<Finding> {
             t.starts_with("1.") || t.starts_with("- [")
         });
         if !has_testable && !has_numbered {
-            findings.push(Finding {
-                severity: Severity::Incomplete,
-                points: 5,
-                section: "Acceptance Criteria".to_string(),
-                message: "Acceptance criteria exist but may not be structured as testable conditions. Use Given/When/Then or numbered checklist.".to_string(),
-            });
+            findings.push(incomplete("Acceptance Criteria",
+                "Acceptance criteria present but not structured as testable conditions. Use Given/When/Then."));
         }
     }
 
-    // ─── 7. Feature Sections ───────────────────────────────────────────────
-    let has_features = has("## enhancement") || has("### enhancement")
-        || has("# fe requirement") || has("## fe requirement")
-        || has("## compose") || has("## question")
-        || has("### layout") || has("### rules")
-        || has("scope requirements:") || has("**scope requirements**")
-        || has("# scope requirement")
-        || has("**location**:");
-    if !has_features {
-        findings.push(Finding {
-            severity: Severity::Missing,
-            points: 15,
-            section: "Feature Sections".to_string(),
-            message: "No feature/enhancement sections found. Add detailed specs per feature with Layout, Rules, Data & Update, Edge Cases.".to_string(),
-        });
-    } else if strict {
-        let has_layout = has("### layout") || has("| layout");
-        let has_data_update = has("data & update") || has("data source") || has("api endpoint")
-            || has("update behavior") || has("update frequency");
-        if !has_layout || !has_data_update {
-            let mut missing_subs = Vec::new();
-            if !has_layout { missing_subs.push("Layout"); }
-            if !has_data_update { missing_subs.push("Data & Update Behavior"); }
-            findings.push(Finding {
-                severity: Severity::Incomplete,
-                points: 5,
-                section: "Feature Sections".to_string(),
-                message: format!("Feature sections missing sub-sections: {}. Each feature needs Layout, Rules, Data & Update, Edge Cases.", missing_subs.join(", ")),
-            });
-        }
-    }
-
-    // ─── 8. Design Reference ───────────────────────────────────────────────
-    let has_figma = has("figma.com") || has("figma link") || has("figma design");
-    let has_design_images = has("| design |") || has("| design|") || has("|design|")
-        || (has(".png") && has("figure"));
-    if !has_figma && !has_design_images {
-        findings.push(Finding {
-            severity: Severity::Missing,
-            points: 8,
-            section: "Design Reference".to_string(),
-            message: "No design reference found. Add a Figma link or embed design images with figure labels.".to_string(),
-        });
-    } else if !has_figma && has_design_images {
-        findings.push(Finding {
-            severity: Severity::Suggestion,
-            points: if strict { 3 } else { 2 },
-            section: "Design Reference".to_string(),
-            message: "Design images found but no Figma link. Add a Figma URL for developers to inspect spacing, colors, and specs.".to_string(),
-        });
-    }
-
-    // ─── 9. User Flows ─────────────────────────────────────────────────────
-    let has_user_flow = has("user flow") || has("user journey") || has("entry point")
-        || has("happy path") || has("## flow") || has("behavior flow")
-        || (has("stage") && has("interaction"));
-    if !has_user_flow {
-        findings.push(Finding {
-            severity: if strict { Severity::Missing } else { Severity::Incomplete },
-            points: if strict { 8 } else { 5 },
-            section: "User Flows".to_string(),
-            message: "No user flow section found. Add entry points, happy path, and failure/edge paths.".to_string(),
-        });
-    }
-
-    // ─── 10. Technical Docs / API Contract ─────────────────────────────────
-    let has_tech_docs = has("api contract") || has("api endpoint") || has("sequence diagram")
-        || has("## technical") || has("### technical") || has("## api")
-        || has("## be requirement") || has("# be requirement")
-        || has("backend spec") || has("data model") || has("deeplink")
-        || has("rest api") || has("websocket");
-    if !has_tech_docs {
-        findings.push(Finding {
-            severity: if strict { Severity::Missing } else { Severity::Incomplete },
-            points: if strict { 8 } else { 3 },
-            section: "Technical Docs / API Contract".to_string(),
-            message: "No technical documentation found. Add API contracts, data models, or backend specs for engineering integration.".to_string(),
-        });
-    }
-
-    // ─── 11. Event Tracking ────────────────────────────────────────────────
-    let has_events = has("event tracking") || has("analytics") || has("## event")
-        || has("| event") || has("_viewed") || has("_clicked");
-    if !has_events {
-        findings.push(Finding {
-            severity: Severity::Incomplete,
-            points: 3,
-            section: "Event Tracking".to_string(),
-            message: "No event tracking section. Add analytics events table (Event Name / Trigger / Properties).".to_string(),
-        });
-    }
-
-    // ─── 12. LCMP Keys ────────────────────────────────────────────────────
-    let has_l10n = has("lcmp") || has("localization") || has("multilanguage")
-        || has("| key | en |") || has("| key | id |");
-    if !has_l10n {
-        findings.push(Finding {
-            severity: Severity::Incomplete,
-            points: 3,
-            section: "LCMP Keys".to_string(),
-            message: "No LCMP keys or localization table. Add keys for all user-facing strings (Key / ID / EN / ZH).".to_string(),
-        });
-    }
-
-    // ─── 13. Success Metrics ───────────────────────────────────────────────
-    let has_success = has("success definition") || has("success metric")
-        || has("## success") || has("### success") || has("kpi");
-    if !has_success {
-        findings.push(Finding {
-            severity: if strict { Severity::Missing } else { Severity::Incomplete },
-            points: 5,
-            section: "Success Metrics".to_string(),
-            message: "No success metrics found. Add primary and secondary KPIs to measure feature impact.".to_string(),
-        });
-    }
-
-    // ─── 14. Related PRDs ──────────────────────────────────────────────────
-    if !has("related prd") && !has("## related") {
-        findings.push(Finding {
-            severity: Severity::Suggestion,
-            points: 2,
-            section: "Related PRDs".to_string(),
-            message: "No related PRDs section. Consider linking dependent or related specifications.".to_string(),
-        });
+    // ─── 11. Risks & Open Questions ────────────────────────────────────────
+    let has_risks = has("## risk") || has("### risk") || has("mitigation") || has("risks &");
+    let has_open = has("open question") || has("## open") || has("### open") || has("open issue");
+    if !has_risks && !has_open {
+        findings.push(miss("Risks & Open Questions",
+            "No risks or open questions section. Add a risks table (likelihood/impact/mitigation) and any unresolved questions with owners."));
+    } else if !has_risks || !has_open {
+        let gap = if !has_risks { "risks" } else { "open questions" };
+        findings.push(incomplete("Risks & Open Questions",
+            &format!("Section exists but missing {}. Include both to flag unknowns.", gap)));
     }
 
     // ─── Cross-cutting: Vague Language ─────────────────────────────────────
@@ -776,7 +702,7 @@ fn review_prd(content: &str, raw_md: &str, strict: bool) -> Vec<Finding> {
             severity: Severity::Suggestion,
             points: 2,
             section: "Design-Rule Linkage".to_string(),
-            message: format!("Found {} design figures but rules don't reference them. Link each figure to its corresponding rule.", figure_count),
+            message: format!("Found {} design figures but no rule references them. Link each figure to its corresponding rule.", figure_count),
         });
     }
 
