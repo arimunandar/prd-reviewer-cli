@@ -117,7 +117,7 @@ prompt_secret_optional() {
     if [ -n "$hint" ]; then
         echo -e "  ${DIM}$hint${NC}"
     fi
-    echo -n "  $label ${DIM}(optional, press Enter to skip)${NC}: "
+    echo -en "  $label ${DIM}(optional, press Enter to skip)${NC}: "
     local value=""
     read -rs value
     echo ""
