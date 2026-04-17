@@ -4,7 +4,14 @@
 
 `prd-reviewer` is a Rust CLI + Claude Code skill/agent that helps product
 teams review existing PRDs, generate new PRDs from briefs, and adjust
-PRDs that have gaps — all against an 11-section compact standard.
+PRDs that have gaps — all against an 11-section compact standard with a
+95/100 approval gate.
+
+> 📚 **New here?** Start with
+> [docs/PRODUCT_OVERVIEW.md](docs/PRODUCT_OVERVIEW.md) — the full
+> product pitch, value story, and adoption plan. For a real-world
+> sample review output, see [docs/SAMPLE_REVIEW.md](docs/SAMPLE_REVIEW.md).
+> For technical architecture, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Features
 
