@@ -1,0 +1,23 @@
+[package]
+name = "prd-reviewer"
+version = "1.0.0"
+edition = "2021"
+description = "PRD Reviewer CLI — fetch and review Product Requirement Documents for automation-readiness"
+
+[[bin]]
+name = "prd-reviewer"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+ureq = { version = "2", features = ["json", "tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+comfy-table = "7"
+regex = "1"
+sha2 = "0.10"
+hmac = "0.12"
+base64 = "0.22"
+rustls = { version = "0.23", features = ["ring"] }
+html2md = "0.2"
