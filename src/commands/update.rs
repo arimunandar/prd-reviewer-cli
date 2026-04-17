@@ -8,12 +8,6 @@ fn install_dir() -> String {
     format!("{}/.prd-reviewer/cli", home)
 }
 
-/// Legacy cache location from the tuntun-ios era — removed on update if present.
-fn legacy_install_dir() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-    format!("{}/.tuntun/cli", home)
-}
-
 pub fn run() {
     println!("Checking for updates...");
     println!();
@@ -23,13 +17,6 @@ pub fn run() {
         eprintln!("Error: `cargo` not found. Install Rust first:");
         eprintln!("  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh");
         std::process::exit(1);
-    }
-
-    // Drop the legacy tuntun-ios cache if still lying around.
-    let legacy = legacy_install_dir();
-    if Path::new(&legacy).exists() {
-        println!("  Removing legacy cache at {}", legacy);
-        let _ = std::fs::remove_dir_all(&legacy);
     }
 
     let dir = install_dir();
@@ -98,7 +85,7 @@ fn sync_current_project() {
         Err(_) => return,
     };
 
-    if !super::init::has_tuntun_files(&cwd) {
+    if !super::init::has_project_files(&cwd) {
         return;
     }
 

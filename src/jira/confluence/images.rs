@@ -32,11 +32,28 @@ fn is_downloadable_image_url(url: &str) -> bool {
         || url.contains("/rest/api/2/attachment/")
 }
 
+/// Cache images under `<project>/.prd-reviewer/images/<page_id>/` when a project
+/// root is detectable, otherwise fall back to `$TMPDIR/prd-reviewer/images/<page_id>/`.
 fn image_cache_dir(page_id: &str) -> PathBuf {
+    if let Some(root) = find_project_root() {
+        return root.join(".prd-reviewer").join("images").join(page_id);
+    }
     std::env::temp_dir()
-        .join("tuntun")
+        .join("prd-reviewer")
         .join("images")
         .join(page_id)
+}
+
+fn find_project_root() -> Option<PathBuf> {
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        if dir.join(".prd-reviewer").exists() || dir.join(".claude").exists() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
 }
 
 fn download_image(url: &str, cache_dir: &PathBuf, client: &Client) -> Result<String, String> {

@@ -116,16 +116,22 @@ defined in `.claude/skills/prd-reviewer/SKILL.md` — follow it exactly.
 
 The CLI provides data; YOU own all judgment.
 
-1. `prd-reviewer prd fetch <PAGE_ID> --raw` — fetch PRD content
+1. `prd-reviewer prd fetch <PAGE_ID> --raw` — fetch PRD content. Then
+   **Read every image/attachment referenced in the raw markdown** (they
+   are downloaded to a local cache under `.prd-reviewer/images/<page_id>/`
+   and linked inline). Treat images as first-class input — they often
+   encode layout rules, edge states, and LCMP that the text leaves
+   implicit.
 2. `prd-reviewer prd rules --json` — load 11-section rules + weights
 3. For each of the 11 sections, judge by **meaning** (not keywords):
    classify OK / Incomplete / Missing / N/A-with-note. Run cross-section
    validation (acceptance ↔ features, flows ↔ features, metrics ↔
    objectives).
-4. **Interview step** — when a section's status is ambiguous, ask the PM
-   via `AskUserQuestion` before deciding. Do NOT guess. Batch questions
-   into a single round. Skip the interview for unambiguously missing
-   sections.
+4. **Interview to clarify findings** — whenever a finding is ambiguous,
+   borderline, or depends on PM intent that isn't written down, ask via
+   `AskUserQuestion` **before** locking the verdict. Do NOT guess.
+   Batch questions into a single round, one per ambiguous finding.
+   Skip the interview for unambiguously missing sections.
 5. Inspect Figma via `prd-reviewer figma url '<URL>'` when applicable.
 6. Compute score = 100 − Σ(deductions) and produce the report with
    Score · Section Checklist · Blockers (P0) · Quality (P1) ·
@@ -137,7 +143,7 @@ The CLI provides data; YOU own all judgment.
 1. Parse the seed brief. Identify unknowns.
 2. Interview with `AskUserQuestion` in batched passes (framing / scope /
    requirements). Stop as soon as you have enough.
-3. Draft the PRD against all 11 sections, saving to `.tuntun/prd/<slug>.md`.
+3. Draft the PRD against all 11 sections, saving to `.prd-reviewer/prd/<slug>.md`.
 4. Self-score. Iterate until ≥ 95 or log remaining gaps as Open Questions.
 5. Present: file path, score, open questions, recommended next step.
 
@@ -243,11 +249,20 @@ The CLI is a data provider. YOU (the AI) own all judgment — no keyword matchin
 Read the PRD content + rules, reason by meaning, interview the PM when any
 section is ambiguous, then compute the score and produce the report.
 
-### Step 1 — Fetch content
+### Step 1 — Fetch content + all attachments
 ```bash
 prd-reviewer prd fetch <PAGE_ID> --raw
 ```
-Read `.tuntun/prd/<title>.raw.md` for the full PRD text.
+
+- Read `.prd-reviewer/prd/<title>.raw.md` for the full PRD text.
+- **Always read every image and attachment referenced in the PRD.** The fetcher
+  downloads them to a local cache and rewrites `![alt](...)` links to local
+  paths (e.g. `.prd-reviewer/images/<page_id>/<filename>`). Walk the raw
+  markdown, find every `![...](.prd-reviewer/images/...)` or `![...](/.prd-reviewer/...)`
+  reference, and use the `Read` tool on each image so the design, mockups,
+  diagrams, and screenshots become part of your review context.
+- Images often carry rules, edge states, and LCMP that the text leaves implicit
+  — treat them as first-class input, not decoration.
 
 ### Step 2 — Load the rules
 ```bash
@@ -269,9 +284,13 @@ Also perform cross-section validation:
 - Success Metrics align with Objectives
 - Out-of-scope items are not contradicted by any feature
 
-### Step 4 — Interview the PM (when ambiguous) — REQUIRED
-When a section's status is ambiguous, ask the PM via `AskUserQuestion` before
-deciding. **Do NOT guess.** Batch questions into a single round where possible.
+### Step 4 — Interview the PM to clarify findings — REQUIRED
+Whenever your finding is ambiguous, borderline, or depends on intent that
+isn't written down, ask the PM via `AskUserQuestion` **before** locking the
+verdict. This includes: "is this N/A on purpose", "is the KPI elsewhere",
+"was this image meant to replace the text rules", etc. **Do NOT guess.**
+Batch questions into a single round where possible, one per ambiguous
+finding.
 
 Common patterns:
 
@@ -391,7 +410,7 @@ Write the PRD against all 11 sections using the canonical template:
 ```bash
 prd-reviewer prd template
 ```
-Save to `.tuntun/prd/<slug>.md`. Fill every section. Where the user didn't
+Save to `.prd-reviewer/prd/<slug>.md`. Fill every section. Where the user didn't
 commit, write a concrete placeholder AND add an entry to § 11 **Open Questions**.
 
 ### Step 4 — Self-score
@@ -463,7 +482,7 @@ the user the exact wiki-paste steps.)
 | Show the review workflow | `prd-reviewer prd workflow` |
 | Post review HTML to wiki | `prd-reviewer jira wiki page comment <ID> --file <html> --insecure` |
 | PRD template (11 sections) | `prd-reviewer prd template` |
-| List saved PRDs | `ls .tuntun/prd/` |
+| List saved PRDs | `ls .prd-reviewer/prd/` |
 | Inspect Figma design | `prd-reviewer figma url '<URL>'` |
 
 ## Rules for the report HTML (when posting to wiki)
@@ -477,6 +496,6 @@ the user the exact wiki-paste steps.)
 ## Notes
 - A good PRD should be implementable without asking the PM any questions
 - Never invent data (KPIs, SLAs, persona names). If unknown — ask via AskUserQuestion or log as an Open Question
-- Raw fetched PRD: `.tuntun/prd/<title>.raw.md` · Draft / revised: `.tuntun/prd/<title>.md`
+- Raw fetched PRD: `.prd-reviewer/prd/<title>.raw.md` · Draft / revised: `.prd-reviewer/prd/<title>.md`
 "#
 }

@@ -447,7 +447,7 @@ fn run_screenshot(url_str: &str, scale: f64) -> Result<(), FigmaError> {
     let safe_id = parsed.node_id.replace(':', "-");
     let filename = format!("figma_{}_{}_{}x.png", parsed.file_key, safe_id, scale as u32);
 
-    // Save to .tuntun/figma/ if project root exists, otherwise temp dir
+    // Save to .prd-reviewer/figma/ if project root exists, otherwise temp dir
     let out_path = find_figma_output_dir()
         .map(|dir| dir.join(&filename))
         .unwrap_or_else(|| std::env::temp_dir().join(&filename));
@@ -466,8 +466,8 @@ fn run_screenshot(url_str: &str, scale: f64) -> Result<(), FigmaError> {
 fn find_figma_output_dir() -> Option<std::path::PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
-        if dir.join(".tuntun").exists() || dir.join(".claude").exists() {
-            return Some(dir.join(".tuntun").join("figma"));
+        if dir.join(".prd-reviewer").exists() || dir.join(".claude").exists() {
+            return Some(dir.join(".prd-reviewer").join("figma"));
         }
         if !dir.pop() {
             return None;

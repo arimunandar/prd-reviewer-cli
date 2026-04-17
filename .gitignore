@@ -19,5 +19,5 @@
 # Claude Code
 .claude/
 
-# tuntun-ios CLI output
-.tuntun/
+# prd-reviewer CLI output
+.prd-reviewer/

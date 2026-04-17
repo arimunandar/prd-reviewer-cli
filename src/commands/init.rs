@@ -43,9 +43,9 @@ pub fn sync_files(target: &Path, quiet: bool) {
     fs::create_dir_all(&agents_dir).ok();
     fs::create_dir_all(&skills_dir).ok();
 
-    // .tuntun dir for cached wiki PRDs
-    let tuntun_dir = target.join(".tuntun");
-    fs::create_dir_all(tuntun_dir.join("prd")).ok();
+    // .prd-reviewer dir for cached wiki PRDs
+    let prd_dir = target.join(".prd-reviewer");
+    fs::create_dir_all(prd_dir.join("prd")).ok();
 
     // CLAUDE.md: create or replace prd-reviewer section (preserves user content)
     let claude_path = target.join("CLAUDE.md");
@@ -61,7 +61,7 @@ pub fn sync_files(target: &Path, quiet: bool) {
 }
 
 /// Check if a directory has prd-reviewer files (used by update to find projects).
-pub fn has_tuntun_files(path: &Path) -> bool {
+pub fn has_project_files(path: &Path) -> bool {
     path.join(".claude/skills/prd-reviewer/SKILL.md").exists()
         || path.join("CLAUDE.md")
             .exists()

@@ -405,7 +405,7 @@ fn run_issue(cmd: IssueCommands) -> Result<(), JiraError> {
 
             print!("{}", full_md);
 
-            // Auto-save to .tuntun/tasks/<key>.md
+            // Auto-save to .prd-reviewer/tasks/<key>.md
             save_task(&issue.key, &full_md);
 
             Ok(())
@@ -591,7 +591,7 @@ fn run_page(cmd: PageCommands) -> Result<(), JiraError> {
             // Print to stdout
             println!("{}", full_md);
 
-            // Auto-save to .tuntun/prd/<title>.md if inside a project
+            // Auto-save to .prd-reviewer/prd/<title>.md if inside a project
             save_prd(&page.title, &full_md);
 
             Ok(())
@@ -685,14 +685,14 @@ fn new_client(insecure: bool) -> Result<Client, JiraError> {
     Ok(Client::new(&cfg, insecure))
 }
 
-/// Save Jira issue markdown to .tuntun/tasks/<key>.md in the current project.
+/// Save Jira issue markdown to .prd-reviewer/tasks/<key>.md in the current project.
 fn save_task(key: &str, content: &str) {
     let project_root = match find_project_root() {
         Some(root) => root,
         None => return,
     };
 
-    let tasks_dir = project_root.join(".tuntun").join("tasks");
+    let tasks_dir = project_root.join(".prd-reviewer").join("tasks");
     if std::fs::create_dir_all(&tasks_dir).is_err() {
         return;
     }
@@ -706,14 +706,14 @@ fn save_task(key: &str, content: &str) {
     }
 }
 
-/// Save wiki page markdown to .tuntun/prd/<title>.md in the current project.
+/// Save wiki page markdown to .prd-reviewer/prd/<title>.md in the current project.
 fn save_prd(title: &str, content: &str) {
     let project_root = match find_project_root() {
         Some(root) => root,
         None => return, // not inside a project, skip silently
     };
 
-    let prd_dir = project_root.join(".tuntun").join("prd");
+    let prd_dir = project_root.join(".prd-reviewer").join("prd");
     if std::fs::create_dir_all(&prd_dir).is_err() {
         return;
     }
@@ -745,11 +745,11 @@ fn save_prd(title: &str, content: &str) {
     }
 }
 
-/// Walk up from cwd to find a project root (has .tuntun/ or .claude/).
+/// Walk up from cwd to find a project root (has .prd-reviewer/ or .claude/).
 fn find_project_root() -> Option<std::path::PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
-        if dir.join(".tuntun").exists() || dir.join(".claude").exists() {
+        if dir.join(".prd-reviewer").exists() || dir.join(".claude").exists() {
             return Some(dir);
         }
         if !dir.pop() {

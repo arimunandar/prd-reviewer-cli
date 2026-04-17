@@ -355,6 +355,7 @@ fn fetch_raw(page_id: &str, insecure: bool) -> Result<FormattedPrd, JiraError> {
 
     let base = page.links.as_ref().map(|l| l.base.as_str()).unwrap_or("");
     let text = confluence::convert_to_lightweight_markdown(&raw_html, base);
+    let text = confluence::download_images(&text, page_id, &client);
 
     let mut content = String::new();
 
@@ -391,13 +392,16 @@ const PRD_WORKFLOW: &str = r#"# PRD Review Workflow — 7 Steps
 The CLI is a data provider; the AI (via the `/prd-reviewer` skill or
 `@prd-reviewer` agent) applies judgment. Follow these steps.
 
-## Step 1 — Fetch the PRD
+## Step 1 — Fetch the PRD (text + attachments)
 
 ```bash
 prd-reviewer prd fetch <PAGE_ID> --raw
 ```
 
-Read the saved file at `.tuntun/prd/<title>.raw.md`.
+- Read the saved file at `.prd-reviewer/prd/<title>.raw.md`.
+- **Also read every image/attachment** — the fetcher downloads them to
+  `.prd-reviewer/images/<page_id>/` and rewrites the inline links.
+  Open each image; designs and screenshots carry rules the text omits.
 
 ## Step 2 — Load the rules
 
@@ -418,10 +422,11 @@ For each of the 11 sections, decide by **meaning**, not keyword matching:
 
 Classify each as **OK** / **Incomplete** / **Missing** / **N/A-with-note**.
 
-## Step 4 — Interview the PM (when ambiguous)
+## Step 4 — Interview the PM to clarify findings
 
-When a section's status is ambiguous, ask the PM via `AskUserQuestion` before
-deciding. Do NOT guess. Examples:
+Whenever a finding is ambiguous, borderline, or depends on PM intent that
+isn't written down, ask via `AskUserQuestion` **before** locking the verdict.
+Do NOT guess. Examples:
 
 - **LCMP absent?** → "Is this a backend-only change with no user-facing strings?"
   Options: [ "Yes — mark N/A", "No — needs LCMP keys" ]
@@ -910,7 +915,7 @@ fn save_prd(title: &str, content: &str) {
         None => return,
     };
 
-    let prd_dir = project_root.join(".tuntun").join("prd");
+    let prd_dir = project_root.join(".prd-reviewer").join("prd");
     if std::fs::create_dir_all(&prd_dir).is_err() {
         return;
     }
@@ -943,7 +948,7 @@ fn save_prd_raw(title: &str, content: &str) {
         None => return,
     };
 
-    let prd_dir = project_root.join(".tuntun").join("prd");
+    let prd_dir = project_root.join(".prd-reviewer").join("prd");
     if std::fs::create_dir_all(&prd_dir).is_err() {
         return;
     }
@@ -973,7 +978,7 @@ fn save_prd_raw(title: &str, content: &str) {
 fn find_project_root() -> Option<std::path::PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
-        if dir.join(".tuntun").exists() || dir.join(".claude").exists() {
+        if dir.join(".prd-reviewer").exists() || dir.join(".claude").exists() {
             return Some(dir);
         }
         if !dir.pop() {
