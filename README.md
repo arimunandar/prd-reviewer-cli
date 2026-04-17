@@ -52,20 +52,26 @@ You can also edit `~/.prd-reviewer.yaml` directly at any time.
 
 ## Quick Start
 
+The CLI is a **data provider**. It fetches PRDs and emits the 11-section rules
++ workflow. The AI (via the `/prd-reviewer` skill or `@prd-reviewer` agent)
+owns the judgment and interviews the PM via `AskUserQuestion` when a section
+is ambiguous.
+
 ```bash
 # Initialize a project (installs skill + agent + CLAUDE.md section)
 prd-reviewer init
 
-# Fetch a PRD
+# Fetch a PRD for the AI to review
 prd-reviewer prd fetch 12345 --raw
 
-# Run the CLI structural review (Layer 1)
-prd-reviewer prd review 12345
+# Load the 11-section rules
+prd-reviewer prd rules                # markdown
+prd-reviewer prd rules --json         # machine-readable (for the AI)
 
-# Get a JSON score (for CI / gating)
-prd-reviewer prd score 12345
+# Read the review workflow the AI follows
+prd-reviewer prd workflow
 
-# Get the PRD template (v3, 11 sections)
+# Canonical PRD template (for Generate mode)
 prd-reviewer prd template
 ```
 
@@ -125,7 +131,7 @@ figma:
 ## CLI Reference
 
 ```
-prd-reviewer prd <fetch|review|score|template> [args]
+prd-reviewer prd <fetch|rules|workflow|template> [args]
 prd-reviewer jira <issue|wiki> ...
 prd-reviewer figma <url|view|screenshot|node|file|variable|comment|...> ...
 prd-reviewer init [--path <dir>]

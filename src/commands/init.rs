@@ -22,8 +22,9 @@ pub fn run(path: &str) {
     println!();
     println!("CLI Quick Start:");
     println!("  prd-reviewer prd fetch <PAGE_ID> --raw   — fetch raw PRD");
-    println!("  prd-reviewer prd review <PAGE_ID>        — structural review");
-    println!("  prd-reviewer prd review <PAGE_ID> --json — JSON review (machine-readable)");
+    println!("  prd-reviewer prd rules                   — 11-section rules (markdown)");
+    println!("  prd-reviewer prd rules --json            — rules as JSON (for AI)");
+    println!("  prd-reviewer prd workflow                — step-by-step review workflow");
     println!("  prd-reviewer prd template                — PRD template v2");
     println!("  prd-reviewer jira wiki page view <ID>    — view wiki page");
     println!("  prd-reviewer figma url '<URL>'           — inspect Figma design");

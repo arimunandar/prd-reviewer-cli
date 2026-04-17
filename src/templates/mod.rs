@@ -43,12 +43,12 @@ report format live in `.claude/skills/prd-reviewer/SKILL.md`.
 ## Quick Reference
 
 ```bash
-# PRD tools
-prd-reviewer prd fetch <PAGE_ID> --raw          # Raw markdown
+# PRD tools — CLI is a data provider; AI owns review judgment
+prd-reviewer prd fetch <PAGE_ID> --raw          # Raw markdown (feed to AI)
 prd-reviewer prd fetch <PAGE_ID>                # Structured markdown
-prd-reviewer prd review <PAGE_ID> --json        # JSON review (Layer 1)
-prd-reviewer prd review <PAGE_ID>               # 11-section structural review
-prd-reviewer prd review <PAGE_ID> --comment     # Post review to wiki
+prd-reviewer prd rules                          # 11-section rules (markdown)
+prd-reviewer prd rules --json                   # 11-section rules (JSON, for AI)
+prd-reviewer prd workflow                       # 7-step review workflow
 prd-reviewer prd template                       # PRD template v3 (11 sections)
 
 # Confluence Wiki / Jira
@@ -113,13 +113,25 @@ defined in `.claude/skills/prd-reviewer/SKILL.md` — follow it exactly.
 ## Mode Playbooks
 
 ### Review
-1. `prd-reviewer prd fetch <PAGE_ID> --raw`
-2. `prd-reviewer prd review <PAGE_ID> --json` (skip deep review if score < 60)
-3. Apply 11-section deep audit + cross-section validation
-4. Inspect Figma via `prd-reviewer figma url '<URL>'`
-5. Produce report with Score · Blockers (P0) · Quality (P1) · Suggestions (P2)
-   · Strengths · Action Items
-6. Ask user whether to post review HTML to wiki
+
+The CLI provides data; YOU own all judgment.
+
+1. `prd-reviewer prd fetch <PAGE_ID> --raw` — fetch PRD content
+2. `prd-reviewer prd rules --json` — load 11-section rules + weights
+3. For each of the 11 sections, judge by **meaning** (not keywords):
+   classify OK / Incomplete / Missing / N/A-with-note. Run cross-section
+   validation (acceptance ↔ features, flows ↔ features, metrics ↔
+   objectives).
+4. **Interview step** — when a section's status is ambiguous, ask the PM
+   via `AskUserQuestion` before deciding. Do NOT guess. Batch questions
+   into a single round. Skip the interview for unambiguously missing
+   sections.
+5. Inspect Figma via `prd-reviewer figma url '<URL>'` when applicable.
+6. Compute score = 100 − Σ(deductions) and produce the report with
+   Score · Section Checklist · Blockers (P0) · Quality (P1) ·
+   Suggestions (P2) · Strengths (3–5) · Action Items.
+7. Ask user via `AskUserQuestion` whether to post the review HTML to the
+   wiki page.
 
 ### Generate
 1. Parse the seed brief. Identify unknowns.
@@ -227,38 +239,68 @@ without explanation = full penalty.
 
 ## MODE 1: Review
 
-### Step 1 — Fetch
+The CLI is a data provider. YOU (the AI) own all judgment — no keyword matching.
+Read the PRD content + rules, reason by meaning, interview the PM when any
+section is ambiguous, then compute the score and produce the report.
+
+### Step 1 — Fetch content
 ```bash
 prd-reviewer prd fetch <PAGE_ID> --raw
 ```
-Read `.tuntun/prd/<title>.raw.md` for full content.
+Read `.tuntun/prd/<title>.raw.md` for the full PRD text.
 
-### Step 2 — CLI pre-check (Layer 1, structural)
+### Step 2 — Load the rules
 ```bash
-prd-reviewer prd review <PAGE_ID> --json
+prd-reviewer prd rules --json
 ```
-Returns a JSON result with a `score` field (0–100). If score < 60, report the structural gaps and stop — do not run the deep review until basics are fixed.
+Canonical 11-section standard + weights + automation-readiness criteria.
+(The same rules are embedded in the table above — use whichever is handy.)
 
-### Step 3 — Deep semantic review (Layer 2)
-For each of the 11 sections, judge:
-1. **Present?** (heading exists, even if renamed)
-2. **Complete?** (covers required sub-items from the table above)
-3. **Automation-ready?** (an engineer can act without asking clarifying questions)
+### Step 3 — Section-by-section review (by MEANING, not keywords)
+For each section, classify as **OK / Incomplete / Missing / N/A-with-note**:
+1. **Present?** — a section covering this exists, even under a different heading ("Executive Summary" = TL;DR, "Goals" = Objectives).
+2. **Complete?** — covers the `check` criterion from the rules.
+3. **Automation-ready?** — an engineer can act without asking clarifying questions.
 
-### Step 4 — Cross-section validation
-- [ ] Acceptance Criteria cover ALL features in § 7
-- [ ] User Flows reach every feature in § 7
-- [ ] Design figures cover every state in Edge Cases
-- [ ] Success Metrics (§ 4) align with Objectives (§ 4)
-- [ ] Out-of-scope items (§ 5) are not contradicted by any feature in § 7
+Also perform cross-section validation:
+- Acceptance Criteria cover ALL features in Functional Requirements
+- User Flows reach every feature
+- Design figures cover every state in Edge Cases
+- Success Metrics align with Objectives
+- Out-of-scope items are not contradicted by any feature
+
+### Step 4 — Interview the PM (when ambiguous) — REQUIRED
+When a section's status is ambiguous, ask the PM via `AskUserQuestion` before
+deciding. **Do NOT guess.** Batch questions into a single round where possible.
+
+Common patterns:
+
+| Ambiguity | Question | Options |
+|-----------|----------|---------|
+| LCMP absent | "Is this a backend-only change with no user-facing strings?" | Yes — mark N/A / No — needs LCMP keys |
+| Objectives without KPIs | "Are the success metrics in a linked doc?" | Yes — linked (OK) / No — add here (Incomplete) |
+| Out-of-Scope missing | "Is out-of-scope intentionally omitted?" | Yes — everything is in scope / No — needs explicit list |
+| Thin Acceptance Criteria | "How should the error state behave?" | Toast + retry / Full-screen + back / Silent retry 3x then toast / Other |
+| No Risks section | "Are there any known risks?" | Add them / None identified (mark N/A) |
+| Single persona only | "Is this feature for a single audience?" | Yes (OK) / Need more personas (Incomplete) |
+
+Skip the interview for sections that are unambiguously missing (e.g. zero
+Acceptance Criteria — no need to ask). Interview only resolves borderline cases.
 
 ### Step 5 — Inspect Figma (when applicable)
 ```bash
 prd-reviewer figma url '<FIGMA_URL>'
 ```
-Check design exists and matches what the PRD describes.
+Confirm the design file exists and matches the PRD description.
 
-### Step 6 — Generate report
+### Step 6 — Compute score & generate report
+
+```
+score = 100 − Σ(deductions)
+```
+
+Report format:
+
 ```markdown
 ## PRD Review: <Title>
 
@@ -292,7 +334,12 @@ Check design exists and matches what the PRD describes.
 ```
 
 ### Step 7 — (Optional) post to wiki
-Ask the user first with `AskUserQuestion`. If yes, write HTML to `/tmp/prd_review_<PAGE_ID>.html` and:
+Ask first via `AskUserQuestion`:
+```
+"Post this review as a comment on the wiki page?"
+options: ["Yes — post now", "No — keep it local"]
+```
+If yes, write the report HTML to `/tmp/prd_review_<PAGE_ID>.html` and:
 ```bash
 prd-reviewer jira wiki page comment <PAGE_ID> --file /tmp/prd_review_<PAGE_ID>.html --insecure
 ```
@@ -411,9 +458,10 @@ the user the exact wiki-paste steps.)
 | Task | Command |
 |------|---------|
 | Fetch raw PRD | `prd-reviewer prd fetch <PAGE_ID> --raw` |
-| Structural review (CLI Layer 1) | `prd-reviewer prd review <PAGE_ID>` |
-| Review as JSON | `prd-reviewer prd review <PAGE_ID> --json` |
-| Post review to wiki | `prd-reviewer prd review <PAGE_ID> --comment` |
+| Load review rules (markdown) | `prd-reviewer prd rules` |
+| Load review rules (JSON) | `prd-reviewer prd rules --json` |
+| Show the review workflow | `prd-reviewer prd workflow` |
+| Post review HTML to wiki | `prd-reviewer jira wiki page comment <ID> --file <html> --insecure` |
 | PRD template (11 sections) | `prd-reviewer prd template` |
 | List saved PRDs | `ls .tuntun/prd/` |
 | Inspect Figma design | `prd-reviewer figma url '<URL>'` |

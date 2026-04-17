@@ -7,90 +7,110 @@ use crate::jira::config::Config;
 use crate::jira::confluence;
 use crate::jira::error::JiraError;
 
-// ─── Unified PRD Review Framework ──────────────────────────────────────────
-// 11 mandatory sections, weights sum to 100. Shared with the /prd-reviewer
-// Claude Code skill. Approval threshold: 95/100.
+// ─── 11-Section Compact Standard ───────────────────────────────────────────
+// The CLI is a data provider: it emits these rules and the review workflow.
+// The /prd-reviewer skill and @prd-reviewer agent own all judgment — they
+// read the fetched PRD + these rules, reason by meaning (not keywords),
+// interview the PM via AskUserQuestion when a section is ambiguous, compute
+// the score, and produce the report.
+//
+// Deductions sum to 100. Approval threshold: 95/100.
 
-#[allow(dead_code)]
 struct SectionSpec {
     id: u8,
     name: &'static str,
     weight_missing: u32,
     weight_incomplete: u32,
+    check: &'static str,
 }
 
 const PRD_SECTIONS: &[SectionSpec] = &[
-    SectionSpec { id: 1,  name: "Metadata",                      weight_missing: 4,  weight_incomplete: 2 },
-    SectionSpec { id: 2,  name: "TL;DR",                         weight_missing: 5,  weight_incomplete: 2 },
-    SectionSpec { id: 3,  name: "Background & Problem",          weight_missing: 10, weight_incomplete: 3 },
-    SectionSpec { id: 4,  name: "Objectives & Success Metrics",  weight_missing: 12, weight_incomplete: 4 },
-    SectionSpec { id: 5,  name: "Scope (In/Out)",                weight_missing: 8,  weight_incomplete: 3 },
-    SectionSpec { id: 6,  name: "User Stories",                  weight_missing: 7,  weight_incomplete: 2 },
-    SectionSpec { id: 7,  name: "Functional Requirements",       weight_missing: 18, weight_incomplete: 6 },
-    SectionSpec { id: 8,  name: "Design Reference",              weight_missing: 8,  weight_incomplete: 3 },
-    SectionSpec { id: 9,  name: "User Flows / Journey",          weight_missing: 8,  weight_incomplete: 3 },
-    SectionSpec { id: 10, name: "Acceptance Criteria",           weight_missing: 15, weight_incomplete: 5 },
-    SectionSpec { id: 11, name: "Risks & Open Questions",        weight_missing: 5,  weight_incomplete: 2 },
+    SectionSpec { id: 1,  name: "Metadata",                     weight_missing: 4,  weight_incomplete: 2,
+        check: "Document Status, Owner, Designer, Figma link, Version, Changelog, Urgency" },
+    SectionSpec { id: 2,  name: "TL;DR",                        weight_missing: 5,  weight_incomplete: 2,
+        check: "2–4 sentence executive summary: what, who, why now, primary outcome" },
+    SectionSpec { id: 3,  name: "Background & Problem",         weight_missing: 10, weight_incomplete: 3,
+        check: "Why this exists — user/business problem, current state, impact if not built" },
+    SectionSpec { id: 4,  name: "Objectives & Success Metrics", weight_missing: 12, weight_incomplete: 4,
+        check: "Measurable goals AND KPI targets with measurement window" },
+    SectionSpec { id: 5,  name: "Scope (In/Out)",               weight_missing: 8,  weight_incomplete: 3,
+        check: "Explicit In-Scope and Out-of-Scope lists to prevent scope creep" },
+    SectionSpec { id: 6,  name: "User Stories",                 weight_missing: 7,  weight_incomplete: 2,
+        check: "≥ 3 stories: \"As a <persona>, I want X so that Y\"" },
+    SectionSpec { id: 7,  name: "Functional Requirements",      weight_missing: 18, weight_incomplete: 6,
+        check: "Per feature: Layout, Rules, Data & Update Behavior, Edge Cases (Loading/Loaded/Empty/Error/Offline)" },
+    SectionSpec { id: 8,  name: "Design Reference",             weight_missing: 8,  weight_incomplete: 3,
+        check: "Figma link; every screen/state labeled figure X.N; each figure referenced by ≥ 1 rule" },
+    SectionSpec { id: 9,  name: "User Flows / Journey",         weight_missing: 8,  weight_incomplete: 3,
+        check: "Entry points, primary journey, edge paths with recovery" },
+    SectionSpec { id: 10, name: "Acceptance Criteria",          weight_missing: 15, weight_incomplete: 5,
+        check: "Given/When/Then covering happy path, error, empty, offline" },
+    SectionSpec { id: 11, name: "Risks & Open Questions",       weight_missing: 5,  weight_incomplete: 2,
+        check: "Risks table (likelihood/impact/mitigation) + open questions with owner + due date" },
 ];
 
 const APPROVAL_THRESHOLD: u32 = 95;
+const STANDARD_VERSION: &str = "v3";
 
-// ─── Serializable Output Structs ──────────────────────────────────────────
+const AUTOMATION_READINESS: &[&str] = &[
+    "Deterministic rules — unambiguous, measurable conditions (no \"improve\" / \"better\" / \"nice\")",
+    "Complete data contracts — every data-driven feature names endpoint / payload / event",
+    "State coverage — Loading · Loaded · Empty · Error · Offline",
+    "Figure-to-rule mapping — every figure X.N is referenced by at least one rule",
+    "Testable acceptance criteria — Given/When/Then or numbered verifiable conditions",
+    "LCMP completeness — every user-facing string has a localization key",
+];
+
+// ─── Serializable Rules Output ─────────────────────────────────────────────
 
 #[derive(Serialize)]
-struct ReviewOutput {
-    page_id: String,
-    title: String,
-    score: u32,
+struct RulesJson {
+    standard_version: &'static str,
     threshold: u32,
-    decision: String,
-    findings: Vec<FindingOutput>,
+    sections: Vec<SectionJson>,
+    automation_readiness: Vec<&'static str>,
+    scoring: ScoringJson,
 }
 
 #[derive(Serialize)]
-struct FindingOutput {
-    severity: String,
-    section: String,
-    points: u32,
-    message: String,
+struct SectionJson {
+    id: u8,
+    name: &'static str,
+    weight_missing: u32,
+    weight_incomplete: u32,
+    check: &'static str,
+}
+
+#[derive(Serialize)]
+struct ScoringJson {
+    formula: &'static str,
+    missing: &'static str,
+    incomplete: &'static str,
+    ok: &'static str,
+    na_with_explanation: &'static str,
 }
 
 #[derive(Subcommand)]
 pub enum PrdCommands {
-    /// Fetch wiki page and format as structured PRD
+    /// Fetch a wiki PRD page as markdown (feed this to the AI reviewer)
     Fetch {
         /// Wiki page ID
         page_id: String,
-        /// Also run quality review against the 11-section standard
-        #[arg(long)]
-        review: bool,
-        /// Post review findings as comment on wiki page (requires --review)
-        #[arg(long)]
-        comment: bool,
         /// Output raw lightweight markdown (preserves original structure)
         #[arg(long)]
         raw: bool,
-        /// Output review as JSON (machine-readable; requires --review)
-        #[arg(long)]
-        json: bool,
         /// Skip TLS verification
         #[arg(long, default_value = "true")]
         insecure: bool,
     },
-    /// Review a fetched PRD against the 11-section compact standard
-    Review {
-        /// Wiki page ID
-        page_id: String,
-        /// Post review findings as comment on the wiki page
-        #[arg(long)]
-        comment: bool,
-        /// Output as JSON (machine-readable)
+    /// Emit the 11-section review rules (markdown by default, --json for machine-readable)
+    Rules {
+        /// Emit as JSON instead of markdown
         #[arg(long)]
         json: bool,
-        /// Skip TLS verification
-        #[arg(long, default_value = "true")]
-        insecure: bool,
     },
+    /// Emit the PRD review workflow the AI should follow
+    Workflow,
     /// Output the canonical PRD template (v3 — 11 sections)
     Template,
 }
@@ -104,7 +124,7 @@ pub fn run(cmd: PrdCommands) {
 
 fn run_inner(cmd: PrdCommands) -> Result<(), JiraError> {
     match cmd {
-        PrdCommands::Fetch { page_id, review, comment, raw, json, insecure } => {
+        PrdCommands::Fetch { page_id, raw, insecure } => {
             if raw {
                 let prd = fetch_raw(&page_id, insecure)?;
                 println!("{}", prd.content);
@@ -114,15 +134,19 @@ fn run_inner(cmd: PrdCommands) -> Result<(), JiraError> {
             let prd = fetch_and_format(&page_id, insecure)?;
             println!("{}", prd.content);
             save_prd(&prd.title, &prd.content);
-            if review {
-                do_review(&page_id, &prd.title, &prd.content, &prd.raw_md, comment, json, insecure)?;
+            Ok(())
+        }
+        PrdCommands::Rules { json } => {
+            if json {
+                print_rules_json();
+            } else {
+                print_rules_markdown();
             }
             Ok(())
         }
-        PrdCommands::Review { page_id, comment, json, insecure } => {
-            let prd = fetch_and_format(&page_id, insecure)?;
-            save_prd(&prd.title, &prd.content);
-            do_review(&page_id, &prd.title, &prd.content, &prd.raw_md, comment, json, insecure)
+        PrdCommands::Workflow => {
+            print!("{}", PRD_WORKFLOW);
+            Ok(())
         }
         PrdCommands::Template => {
             println!("{}", PRD_TEMPLATE);
@@ -131,14 +155,80 @@ fn run_inner(cmd: PrdCommands) -> Result<(), JiraError> {
     }
 }
 
+// ─── Rules + Workflow Emitters ─────────────────────────────────────────────
+
+fn print_rules_markdown() {
+    println!("# PRD Review Rules — 11-Section Compact Standard ({})", STANDARD_VERSION);
+    println!();
+    println!("Approval threshold: **{}/100**. Deductions sum to 100.", APPROVAL_THRESHOLD);
+    println!();
+    println!("## Sections");
+    println!();
+    println!("| # | Section | Missing | Incomplete | What to check |");
+    println!("|---|---------|---------|------------|---------------|");
+    for s in PRD_SECTIONS {
+        println!(
+            "| {} | {} | -{} | -{} | {} |",
+            s.id, s.name, s.weight_missing, s.weight_incomplete, s.check
+        );
+    }
+    println!();
+    println!("## Scoring");
+    println!();
+    println!("- **score = 100 − Σ(deductions)**");
+    println!("- **Missing** — section absent or unrecognizable → full Missing weight");
+    println!("- **Incomplete** — present but gaps → Incomplete weight");
+    println!("- **OK** — complete and automation-ready → 0");
+    println!("- **N/A with explanation** — section doesn't apply and PRD says so → 0");
+    println!();
+    println!("## Automation-Readiness Criteria");
+    println!();
+    println!("Applied especially to Functional Requirements and Acceptance Criteria:");
+    println!();
+    for c in AUTOMATION_READINESS {
+        println!("- {}", c);
+    }
+    println!();
+    println!("## How to use");
+    println!();
+    println!("1. Fetch the PRD: `prd-reviewer prd fetch <PAGE_ID> --raw`");
+    println!("2. Apply these rules by meaning, not keyword matching");
+    println!("3. When a section's status is ambiguous, ask the PM via `AskUserQuestion`");
+    println!("4. Never invent data — log unknowns as Open Questions");
+    println!("5. See `prd-reviewer prd workflow` for the full step-by-step");
+}
+
+fn print_rules_json() {
+    let payload = RulesJson {
+        standard_version: STANDARD_VERSION,
+        threshold: APPROVAL_THRESHOLD,
+        sections: PRD_SECTIONS
+            .iter()
+            .map(|s| SectionJson {
+                id: s.id,
+                name: s.name,
+                weight_missing: s.weight_missing,
+                weight_incomplete: s.weight_incomplete,
+                check: s.check,
+            })
+            .collect(),
+        automation_readiness: AUTOMATION_READINESS.to_vec(),
+        scoring: ScoringJson {
+            formula: "score = 100 - sum(deductions)",
+            missing: "section absent or unrecognizable — apply full Missing weight",
+            incomplete: "section present but has gaps — apply Incomplete weight",
+            ok: "section complete and automation-ready — 0",
+            na_with_explanation: "section doesn't apply and PRD says so — 0",
+        },
+    };
+    println!("{}", serde_json::to_string_pretty(&payload).unwrap_or_default());
+}
+
 // ─── Fetch & Format ────────────────────────────────────────────────────────
 
 struct FormattedPrd {
     title: String,
     content: String,
-    /// Raw markdown from HTML conversion, before section remapping.
-    /// Used by the reviewer to check against original wiki structure.
-    raw_md: String,
 }
 
 fn fetch_and_format(page_id: &str, insecure: bool) -> Result<FormattedPrd, JiraError> {
@@ -246,7 +336,6 @@ fn fetch_and_format(page_id: &str, insecure: bool) -> Result<FormattedPrd, JiraE
     Ok(FormattedPrd {
         title: page.title,
         content: prd.trim().to_string(),
-        raw_md,
     })
 }
 
@@ -291,427 +380,90 @@ fn fetch_raw(page_id: &str, insecure: bool) -> Result<FormattedPrd, JiraError> {
     Ok(FormattedPrd {
         title: page.title,
         content,
-        raw_md: String::new(),
     })
 }
 
-// ─── Quality Review (11-Section Compact Standard) ─────────────────────────
 
-fn do_review(
-    page_id: &str,
-    title: &str,
-    prd_content: &str,
-    raw_md: &str,
-    post_comment: bool,
-    json_output: bool,
-    insecure: bool,
-) -> Result<(), JiraError> {
-    let findings = review_prd(prd_content, raw_md);
+// ─── PRD Review Workflow ──────────────────────────────────────────────────
 
-    let total_deduction: u32 = findings.iter().map(|f| f.points).sum();
-    let score = 100u32.saturating_sub(total_deduction);
-    let approved = score >= APPROVAL_THRESHOLD;
+const PRD_WORKFLOW: &str = r#"# PRD Review Workflow — 7 Steps
 
-    let missing_count = findings.iter().filter(|f| matches!(f.severity, Severity::Missing)).count();
-    let incomplete_count = findings.iter().filter(|f| matches!(f.severity, Severity::Incomplete)).count();
-    let suggestion_count = findings.iter().filter(|f| matches!(f.severity, Severity::Suggestion)).count();
+The CLI is a data provider; the AI (via the `/prd-reviewer` skill or
+`@prd-reviewer` agent) applies judgment. Follow these steps.
 
-    if json_output {
-        print_review_json(page_id, title, score, approved, &findings);
-    } else {
-        print_review_console(score, approved, &findings, missing_count, incomplete_count, suggestion_count);
-    }
+## Step 1 — Fetch the PRD
 
-    let html = build_review_html(title, score, approved, &findings, missing_count, incomplete_count, suggestion_count);
+```bash
+prd-reviewer prd fetch <PAGE_ID> --raw
+```
 
-    if post_comment {
-        let cfg = Config::load()?;
-        cfg.validate()?;
-        let client = Client::new(&cfg, insecure);
+Read the saved file at `.tuntun/prd/<title>.raw.md`.
 
-        match wiki_api::add_comment(&client, page_id, &html) {
-            Ok(()) => {
-                eprintln!("\n  [posted] Review comment added to wiki page {}", page_id);
-            }
-            Err(e) => {
-                eprintln!("\n  [warning] Failed to post review comment: {}", e);
-            }
-        }
-    } else if !json_output {
-        eprintln!("\n  Use --comment to post these findings to the wiki page");
-    }
+## Step 2 — Load the rules
 
-    Ok(())
-}
+```bash
+prd-reviewer prd rules --json     # machine-readable
+prd-reviewer prd rules            # human-readable markdown
+```
 
-fn findings_to_review_output(page_id: &str, title: &str, score: u32, approved: bool, findings: &[Finding]) -> ReviewOutput {
-    let decision = if approved { "APPROVED" } else { "NEEDS_REVISION" };
-    let finding_outputs: Vec<FindingOutput> = findings.iter().map(|f| FindingOutput {
-        severity: match f.severity {
-            Severity::Missing => "missing",
-            Severity::Incomplete => "incomplete",
-            Severity::Suggestion => "suggestion",
-        }.to_string(),
-        section: f.section.clone(),
-        points: f.points,
-        message: f.message.clone(),
-    }).collect();
-    ReviewOutput {
-        page_id: page_id.to_string(),
-        title: title.to_string(),
-        score,
-        threshold: APPROVAL_THRESHOLD,
-        decision: decision.to_string(),
-        findings: finding_outputs,
-    }
-}
+These emit the 11-section standard, weights, and automation-readiness criteria.
 
-fn print_review_json(page_id: &str, title: &str, score: u32, approved: bool, findings: &[Finding]) {
-    let output = findings_to_review_output(page_id, title, score, approved, findings);
-    println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
-}
+## Step 3 — Section-by-section review (AI judgment)
 
-fn print_review_console(
-    score: u32,
-    approved: bool,
-    findings: &[Finding],
-    missing_count: usize,
-    incomplete_count: usize,
-    suggestion_count: usize,
-) {
-    println!("\n---\n");
-    println!("## PRD Quality Review (11-Section Compact Standard)\n");
+For each of the 11 sections, decide by **meaning**, not keyword matching:
 
-    if findings.is_empty() {
-        println!("No issues found.\n");
-    } else {
-        for (i, finding) in findings.iter().enumerate() {
-            let icon = match finding.severity {
-                Severity::Missing => "🔴",
-                Severity::Incomplete => "🟡",
-                Severity::Suggestion => "🔵",
-            };
-            println!(
-                "{}. {} **{}** (-{} pts) — {}",
-                i + 1, icon, finding.section, finding.points, finding.message
-            );
-        }
-        println!();
-    }
+1. **Present?** — does a section covering this exist, even under a different heading?
+2. **Complete?** — does it cover everything the rules expect?
+3. **Automation-ready?** — can an engineer act on it without asking clarifying questions?
 
-    let status_icon = if approved { "✅" } else { "❌" };
-    let status_text = if approved { "APPROVED" } else { "NEEDS REVISION" };
-    println!("**Score: {}/100** {} {}", score, status_icon, status_text);
-    if !approved {
-        if missing_count > 0 {
-            println!("Required: {}/100 to approve. Fix 🔴 Missing items first.", APPROVAL_THRESHOLD);
-        } else {
-            println!("Required: {}/100 to approve. Address 🟡 Incomplete items.", APPROVAL_THRESHOLD);
-        }
-    }
-    println!("\nSummary: {} missing, {} incomplete, {} suggestions", missing_count, incomplete_count, suggestion_count);
-}
+Classify each as **OK** / **Incomplete** / **Missing** / **N/A-with-note**.
 
-fn build_review_html(
-    title: &str,
-    score: u32,
-    approved: bool,
-    findings: &[Finding],
-    missing_count: usize,
-    incomplete_count: usize,
-    suggestion_count: usize,
-) -> String {
-    let status_text = if approved { "APPROVED" } else { "NEEDS REVISION" };
-    let badge_color = if approved { "#36B37E" } else { "#FF5630" };
+## Step 4 — Interview the PM (when ambiguous)
 
-    let mut html = String::new();
-    html.push_str(&format!("<h2>PRD Review: {}</h2>", title));
-    html.push_str("<p>");
-    html.push_str("<strong>Reviewer:</strong> Engineering (AI-assisted)<br/>");
-    html.push_str(&format!("<strong>Framework:</strong> 11-Section Compact Standard (threshold: {}/100)<br/>", APPROVAL_THRESHOLD));
-    html.push_str(&format!(
-        "<strong>Score:</strong> <span style=\"background-color: {}; color: white; padding: 4px 12px; border-radius: 4px; font-weight: bold;\">{}/100 — {}</span>",
-        badge_color, score, status_text
-    ));
-    html.push_str("</p><hr/>");
+When a section's status is ambiguous, ask the PM via `AskUserQuestion` before
+deciding. Do NOT guess. Examples:
 
-    html.push_str("<h3>Section Checklist</h3>");
-    html.push_str("<table><tr><th>#</th><th>Section</th><th>Status</th><th>Points</th><th>Notes</th></tr>");
+- **LCMP absent?** → "Is this a backend-only change with no user-facing strings?"
+  Options: [ "Yes — mark N/A", "No — needs LCMP keys" ]
+- **Objectives exist but no KPIs?** → "Are the success metrics in a linked doc?"
+  Options: [ "Yes — linked (OK)", "No — add here (Incomplete)" ]
+- **Out-of-Scope missing?** → "Is this intentionally omitted?"
+  Options: [ "Yes — everything is in scope", "No — needs explicit list" ]
 
-    for spec in PRD_SECTIONS {
-        let finding = findings.iter().find(|f| f.section == spec.name);
-        let (status, points, notes) = match finding {
-            Some(f) => {
-                let s = match f.severity {
-                    Severity::Missing => "MISSING",
-                    Severity::Incomplete => "Incomplete",
-                    Severity::Suggestion => "Suggestion",
-                };
-                (s, format!("-{}", f.points), f.message.clone())
-            }
-            None => ("OK", "0".to_string(), String::new()),
-        };
-        html.push_str(&format!(
-            "<tr><td>{}</td><td><strong>{}</strong></td><td>{}</td><td>{}</td><td>{}</td></tr>",
-            spec.id, spec.name, status, points, notes
-        ));
-    }
-    html.push_str("</table><hr/>");
+Ask one question per ambiguous section, batched in a single round where possible.
+Skip the interview for clearly missing sections (e.g. no Acceptance Criteria at
+all is unambiguously missing — no need to ask).
 
-    if missing_count > 0 || incomplete_count > 0 {
-        html.push_str("<h3>Action Items</h3>");
-        html.push_str("<table><tr><th>Priority</th><th>Section</th><th>Action</th></tr>");
-        for f in findings {
-            let priority = match f.severity {
-                Severity::Missing => "P0 — Blocker",
-                Severity::Incomplete => "P1 — Important",
-                Severity::Suggestion => "P2 — Nice to have",
-            };
-            html.push_str(&format!(
-                "<tr><td>{}</td><td><strong>{}</strong></td><td>{}</td></tr>",
-                priority, f.section, f.message
-            ));
-        }
-        html.push_str("</table><hr/>");
-    }
+## Step 5 — Compute score
 
-    html.push_str(&format!(
-        "<p><strong>Summary:</strong> {} missing, {} incomplete, {} suggestions</p>",
-        missing_count, incomplete_count, suggestion_count
-    ));
-    html.push_str(&format!(
-        "<p><strong>Approval threshold:</strong> {}/100. Current score: <strong>{}/100</strong></p>",
-        APPROVAL_THRESHOLD, score
-    ));
+```
+score = 100 − Σ(deductions)
+```
 
-    html
-}
+Use the Missing / Incomplete weights from the rules. N/A-with-note = 0.
 
-enum Severity {
-    Missing,
-    Incomplete,
-    Suggestion,
-}
+## Step 6 — Generate report
 
-struct Finding {
-    severity: Severity,
-    section: String,
-    points: u32,
-    message: String,
-}
+Produce a markdown report with:
 
-/// Review PRD quality using the 11-section compact standard.
-/// Checks both the final formatted content and the raw markdown.
-fn review_prd(content: &str, raw_md: &str) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    let content_lower = content.to_lowercase();
-    let raw_lower = raw_md.to_lowercase();
+- **Score** (XX/100) and decision (APPROVED ≥ 95 / NEEDS REVISION)
+- **Section Checklist** — ALL 11 sections, even when OK
+- **Blockers (P0)** — Missing or critically Incomplete
+- **Quality Issues (P1)** — fixable gaps
+- **Suggestions (P2)** — nice-to-haves
+- **Strengths** — always include 3–5 positives (reviews must be balanced)
+- **Action Items** — priority / item / owner
 
-    let has = |pattern: &str| -> bool {
-        content_lower.contains(pattern) || raw_lower.contains(pattern)
-    };
+## Step 7 — (Optional) post to wiki
 
-    let miss = |section: &str, msg: &str| -> Finding {
-        let spec = PRD_SECTIONS.iter().find(|s| s.name == section).expect("section");
-        Finding {
-            severity: Severity::Missing,
-            points: spec.weight_missing,
-            section: section.to_string(),
-            message: msg.to_string(),
-        }
-    };
-    let incomplete = |section: &str, msg: &str| -> Finding {
-        let spec = PRD_SECTIONS.iter().find(|s| s.name == section).expect("section");
-        Finding {
-            severity: Severity::Incomplete,
-            points: spec.weight_incomplete,
-            section: section.to_string(),
-            message: msg.to_string(),
-        }
-    };
+Ask the user first via `AskUserQuestion`. If yes:
 
-    // ─── 1. Metadata ───────────────────────────────────────────────────────
-    let has_metadata = has("document status") || has("document owner") || has("version")
-        || (has("designer") && (has("figma") || has("status")));
-    let has_metadata_complete = has_metadata && has("document status") && has("document owner");
-    if !has_metadata {
-        findings.push(miss("Metadata",
-            "No metadata table. Add: Document Status, Owner, Designer, Figma link, Version, Urgency."));
-    } else if !has_metadata_complete {
-        findings.push(incomplete("Metadata",
-            "Metadata incomplete. Ensure at least Document Status and Document Owner are present."));
-    }
+```bash
+prd-reviewer jira wiki page comment <PAGE_ID> --file <review.html> --insecure
+```
 
-    // ─── 2. TL;DR / Executive Summary ──────────────────────────────────────
-    let has_tldr = has("tl;dr") || has("tldr") || has("executive summary")
-        || has("## summary") || has("### summary") || has("# summary");
-    if !has_tldr {
-        findings.push(miss("TL;DR",
-            "No TL;DR / Executive Summary. Add a 2–4 sentence summary: what, who, why, primary outcome."));
-    }
-
-    // ─── 3. Background & Problem ───────────────────────────────────────────
-    let has_background = has("background") || has("problem statement")
-        || has("## problem") || has("### problem");
-    if !has_background {
-        findings.push(miss("Background & Problem",
-            "No background / problem section. Explain WHY this feature is needed and the current-state impact."));
-    }
-
-    // ─── 4. Objectives & Success Metrics ───────────────────────────────────
-    let has_objective = has("objective") || has("## goal") || has("### goal");
-    let has_metrics = has("success metric") || has("## success") || has("### success")
-        || has("kpi") || has("target") || has("adoption rate") || has("conversion");
-    if !has_objective && !has_metrics {
-        findings.push(miss("Objectives & Success Metrics",
-            "No objectives or KPIs. Add measurable goals with target numbers and measurement windows."));
-    } else if !has_objective || !has_metrics {
-        let gap = if !has_objective { "objectives" } else { "measurable KPIs" };
-        findings.push(incomplete("Objectives & Success Metrics",
-            &format!("Section exists but missing {}. Every PRD needs both goals and measurable KPIs.", gap)));
-    }
-
-    // ─── 5. Scope (In/Out) ─────────────────────────────────────────────────
-    let has_scope = has("## scope") || has("### scope") || has("# scope")
-        || has("scope requirement") || has("in scope") || has("out of scope")
-        || has("in-scope") || has("out-of-scope");
-    let has_both_scope = (has("in scope") || has("in-scope")) && (has("out of scope") || has("out-of-scope"));
-    if !has_scope {
-        findings.push(miss("Scope (In/Out)",
-            "No scope section. Add In-Scope / Out-of-Scope to set clear boundaries."));
-    } else if !has_both_scope {
-        findings.push(incomplete("Scope (In/Out)",
-            "Scope mentioned but missing explicit In-Scope and Out-of-Scope split. Add both to prevent scope creep."));
-    }
-
-    // ─── 6. User Stories ───────────────────────────────────────────────────
-    let has_user_stories = has("user stor") || has("user storie")
-        || has("as a user") || has("as an admin") || has("as a ")
-        || has("## stories") || has("### stories");
-    if !has_user_stories {
-        findings.push(miss("User Stories",
-            "No user stories. Add ≥ 3 stories in the form: \"As a <persona>, I want X so that Y\"."));
-    }
-
-    // ─── 7. Functional Requirements ────────────────────────────────────────
-    let has_features = has("## functional requirement") || has("### functional requirement")
-        || has("## feature") || has("### feature")
-        || has("## enhancement") || has("### enhancement")
-        || has("# fe requirement") || has("## fe requirement")
-        || has("### layout") || has("### rules")
-        || has("scope requirements:") || has("**scope requirements**")
-        || has("# scope requirement")
-        || has("**location**:");
-    if !has_features {
-        findings.push(miss("Functional Requirements",
-            "No per-feature requirements. Each feature needs Layout, Rules, Data & Update, Edge Cases."));
-    } else {
-        let has_layout = has("### layout") || has("| layout");
-        let has_data_update = has("data & update") || has("data source") || has("api endpoint")
-            || has("update behavior") || has("update frequency");
-        let has_edge_cases = has("edge case") || has("edge cases") || has("empty state") || has("error state");
-        if !has_layout || !has_data_update || !has_edge_cases {
-            let mut missing_subs = Vec::new();
-            if !has_layout { missing_subs.push("Layout"); }
-            if !has_data_update { missing_subs.push("Data & Update"); }
-            if !has_edge_cases { missing_subs.push("Edge Cases"); }
-            findings.push(incomplete("Functional Requirements",
-                &format!("Feature(s) missing sub-sections: {}.", missing_subs.join(", "))));
-        }
-    }
-
-    // ─── 8. Design Reference ───────────────────────────────────────────────
-    let has_figma = has("figma.com") || has("figma link") || has("figma design");
-    let has_design_images = has("| design |") || has("| design|") || has("|design|")
-        || (has(".png") && has("figure"));
-    if !has_figma && !has_design_images {
-        findings.push(miss("Design Reference",
-            "No design reference. Add a Figma link or embed design images with figure labels (figure X.N)."));
-    } else if !has_figma && has_design_images {
-        findings.push(incomplete("Design Reference",
-            "Design images present but no Figma link. Add a Figma URL for spec inspection."));
-    }
-
-    // ─── 9. User Flows / Journey ───────────────────────────────────────────
-    let has_user_flow = has("user flow") || has("user journey") || has("entry point")
-        || has("happy path") || has("## flow") || has("behavior flow")
-        || (has("stage") && has("interaction"));
-    if !has_user_flow {
-        findings.push(miss("User Flows / Journey",
-            "No user flow / journey. Add entry points, primary journey, and edge paths with recovery."));
-    }
-
-    // ─── 10. Acceptance Criteria ───────────────────────────────────────────
-    let has_acceptance = has("acceptance criteria") || has("## acceptance");
-    if !has_acceptance {
-        findings.push(miss("Acceptance Criteria",
-            "No acceptance criteria. Add Given/When/Then scenarios covering happy path, error, empty, and offline."));
-    } else {
-        let has_testable = has("given") && has("when") && has("then");
-        let has_numbered = content.lines().any(|l| {
-            let t = l.trim();
-            t.starts_with("1.") || t.starts_with("- [")
-        }) || raw_md.lines().any(|l| {
-            let t = l.trim();
-            t.starts_with("1.") || t.starts_with("- [")
-        });
-        if !has_testable && !has_numbered {
-            findings.push(incomplete("Acceptance Criteria",
-                "Acceptance criteria present but not structured as testable conditions. Use Given/When/Then."));
-        }
-    }
-
-    // ─── 11. Risks & Open Questions ────────────────────────────────────────
-    let has_risks = has("## risk") || has("### risk") || has("mitigation") || has("risks &");
-    let has_open = has("open question") || has("## open") || has("### open") || has("open issue");
-    if !has_risks && !has_open {
-        findings.push(miss("Risks & Open Questions",
-            "No risks or open questions section. Add a risks table (likelihood/impact/mitigation) and any unresolved questions with owners."));
-    } else if !has_risks || !has_open {
-        let gap = if !has_risks { "risks" } else { "open questions" };
-        findings.push(incomplete("Risks & Open Questions",
-            &format!("Section exists but missing {}. Include both to flag unknowns.", gap)));
-    }
-
-    // ─── Cross-cutting: Vague Language ─────────────────────────────────────
-    let vague_phrases = [
-        "improve the", "better user experience", "make it easier",
-        "enhance the", "optimize the", "as needed", "if necessary",
-        "should be good", "nice to have", "tbd", "to be decided",
-    ];
-    for phrase in &vague_phrases {
-        if content_lower.contains(phrase) {
-            findings.push(Finding {
-                severity: Severity::Incomplete,
-                points: 3,
-                section: "Requirements Clarity".to_string(),
-                message: format!(
-                    "Vague language found: \"{}\". Replace with specific, measurable requirements.",
-                    phrase
-                ),
-            });
-            break;
-        }
-    }
-
-    // ─── Cross-cutting: Figure-Reference Validation ────────────────────────
-    let figure_count = count_pattern(&content_lower, "figure x.") + count_pattern(&raw_lower, "figure x.");
-    let rule_ref_count = count_pattern(&content_lower, "figure x.") + count_pattern(&content_lower, "show figure");
-    if figure_count > 0 && rule_ref_count == 0 {
-        findings.push(Finding {
-            severity: Severity::Suggestion,
-            points: 2,
-            section: "Design-Rule Linkage".to_string(),
-            message: format!("Found {} design figures but no rule references them. Link each figure to its corresponding rule.", figure_count),
-        });
-    }
-
-    findings
-}
-
-fn count_pattern(text: &str, pattern: &str) -> usize {
-    text.matches(pattern).count()
-}
+All 11 sections must appear in the checklist HTML. No emojis. No invented data.
+"#;
 
 // ─── PRD Template ──────────────────────────────────────────────────────────
 

@@ -51,13 +51,18 @@ format live in `.claude/skills/prd-reviewer/SKILL.md`.
 
 ## Quick Reference
 
+The CLI is a **data provider** — it fetches PRD content and emits the 11-section
+rules + workflow. The `/prd-reviewer` skill and `@prd-reviewer` agent own all
+review judgment (they use `AskUserQuestion` to interview the PM when a section's
+status is ambiguous).
+
 ```bash
 # PRD tools
-prd-reviewer prd fetch <PAGE_ID> --raw           # Raw markdown
+prd-reviewer prd fetch <PAGE_ID> --raw           # Raw markdown (feed to AI)
 prd-reviewer prd fetch <PAGE_ID>                 # Structured markdown
-prd-reviewer prd score <PAGE_ID>                 # JSON score (Layer 1)
-prd-reviewer prd review <PAGE_ID>                # Structural review
-prd-reviewer prd review <PAGE_ID> --comment      # Post review to wiki
+prd-reviewer prd rules                           # 11-section standard (markdown)
+prd-reviewer prd rules --json                    # Rules as JSON (for AI)
+prd-reviewer prd workflow                        # 7-step review workflow
 prd-reviewer prd template                        # PRD template v3 (11 sections)
 
 # Confluence Wiki / Jira

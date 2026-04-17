@@ -35,7 +35,7 @@ enum Commands {
         #[command(subcommand)]
         command: commands::jira::JiraCommands,
     },
-    /// PRD tools: fetch, review, and template
+    /// PRD tools: fetch, rules, workflow, and template
     Prd {
         #[command(subcommand)]
         command: commands::prd::PrdCommands,
