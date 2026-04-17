@@ -105,6 +105,14 @@ impl Client {
         self.do_json("POST", url, payload)
     }
 
+    pub fn put<P: Serialize, T: DeserializeOwned>(
+        &self,
+        url: &str,
+        payload: &P,
+    ) -> Result<T, JiraError> {
+        self.do_json("PUT", url, payload)
+    }
+
     pub fn post_no_response<P: Serialize>(&self, url: &str, payload: &P) -> Result<(), JiraError> {
         let (key, val) = self.auth_header(url);
         let mut req = self.agent.post(url).set("Content-Type", "application/json");

@@ -49,7 +49,7 @@ pub fn update_page(
     payload: &WikiUpdatePage,
 ) -> Result<WikiPage, JiraError> {
     let url = format!("{}/{}", client.base_api, id);
-    client.post(&url, payload) // Wiki uses POST for update via the client.Put equivalent
+    client.put(&url, payload)
 }
 
 pub fn export_page(

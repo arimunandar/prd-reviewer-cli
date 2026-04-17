@@ -257,9 +257,12 @@ pub enum PageCommands {
         /// New title
         #[arg(long)]
         title: Option<String>,
-        /// New body (HTML)
+        /// New body (HTML). Use --file to read from file instead
         #[arg(long)]
         body: Option<String>,
+        /// Read new body HTML from file
+        #[arg(long, default_value = "")]
+        file: String,
         #[arg(long, default_value = "true")]
         insecure: bool,
     },
@@ -625,19 +628,22 @@ fn run_page(cmd: PageCommands) -> Result<(), JiraError> {
             Ok(())
         }
 
-        PageCommands::Update { id, title, body, insecure } => {
+        PageCommands::Update { id, title, body, file, insecure } => {
             let client = new_client(insecure)?;
             let current = wiki_api::get_page(&client, &id, "version")?;
             let new_title = title.unwrap_or(current.title);
             let new_version = current.version.map(|v| v.number + 1).unwrap_or(1);
+            let html = if !file.is_empty() {
+                std::fs::read_to_string(&file)?
+            } else {
+                body.unwrap_or_default()
+            };
             let payload = WikiUpdatePage {
                 page_type: "page".to_string(),
                 title: new_title,
                 version: WikiVersionWrite { number: new_version },
                 body: WikiBodyWrite {
-                    storage: WikiStorage {
-                        value: body.unwrap_or_default(),
-                    },
+                    storage: WikiStorage { value: html },
                 },
             };
             let page = wiki_api::update_page(&client, &id, &payload)?;
